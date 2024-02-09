@@ -1,0 +1,25 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.8.34511.84
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Ridgeline", "Ridgeline\Ridgeline.csproj", "{C2DB4CDB-993C-4CBB-B658-3705E5D79BED}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{C2DB4CDB-993C-4CBB-B658-3705E5D79BED}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{C2DB4CDB-993C-4CBB-B658-3705E5D79BED}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{C2DB4CDB-993C-4CBB-B658-3705E5D79BED}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{C2DB4CDB-993C-4CBB-B658-3705E5D79BED}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {A3EC086B-5B97-4CF4-941B-F8E9F71E9A09}
+	EndGlobalSection
+EndGlobal
