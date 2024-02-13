@@ -1,94 +1,203 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
+﻿//using System;
+//using System.Collections.Generic;
+//using System.Linq;
+//using System.Text;
+//using System.Threading.Tasks;
 
 
-using MSREG = Microsoft.Win32;
-using System.Reflection;
+//using MSREG = Microsoft.Win32;
+//using System.Reflection;
 
-using Autodesk.AutoCAD.Runtime;
-using Autodesk.AutoCAD.ApplicationServices;
-using Autodesk.AutoCAD.DatabaseServices;
-using Autodesk.AutoCAD.Colors;
-using Autodesk.AutoCAD.Windows.Data;
-using System.Security.AccessControl;
-
-
-
-namespace Ridgeline
-{
-    internal class Commands
-    {
-        [CommandMethod("RegisterMyApp")]
-        public void RegisterMyApp()
-        {
-            // Get the AutoCAD Applications key
-            string sProdKey = HostApplicationServices.Current.MachineRegistryProductRootKey;
-            string sAppName = "Ridgeline";
-
-            RegistryKey regAcadProdKey = Registry.CurrentUser.OpenSubKey(sProdKey);
-            RegistryKey regAcadAppKey = regAcadProdKey.OpenSubKey("Applications", true);
-
-            // Check to see if the "MyApp" key exists
-            string[] subKeys = regAcadAppKey.GetSubKeyNames();
-            foreach (string subKey in subKeys)
-            {
-                // If the application is already registered, exit
-                if (subKey.Equals(sAppName))
-                {
-                    regAcadAppKey.Close();
-                    return;
-                }
-            }
-
-            // Get the location of this module
-            string sAssemblyPath = Assembly.GetExecutingAssembly().Location;
+//using Autodesk.AutoCAD.Runtime;
+//using Autodesk.AutoCAD.ApplicationServices;
+//using Autodesk.AutoCAD.DatabaseServices;
+//using Autodesk.AutoCAD.Colors;
+//using Autodesk.AutoCAD.Windows.Data;
+//using System.Security.AccessControl;
+//using Autodesk.AutoCAD.EditorInput;
+//using System.IO;
+//using Autodesk.AutoCAD.PlottingServices;
+//using Autodesk.AutoCAD.Geometry;
 
 
-            //            DESCRIPTION
-            //Description of the .NET assembly and is optional.
-            //            LOADCTRLS
-            //Controls how and when the .NET assembly is loaded.
 
-            //1 - Load application upon detection of proxy object
-            //2 - Load the application at startup
-            //4 - Load the application at start of a command
-            //8 - Load the application at the request of a user or another application
-            //16 - Do not load the application
-            //32 - Load the application transparently
-            //LOADER
-            //Specifies which .NET assembly file to load.
+//namespace Ridgeline
+//{
+//    public class Commands
+//    {
+//        // Global values to quickly change plugin settings
+//        private const string PlotStyleTable = "acad.ctb";
+//        private double offsetx = 0.0;
+//        private double offsety = 0.0;
 
-            //MANAGED
-            //Specifies the file that should be loaded is a.NET assembly or ObjectARX file. Set to 1 for .NET assembly files.
+//        [CommandMethod("PDFX")]
+
+//        // Target .NET Framework version as used by AutoCAD
+//        public void BatchPlotToPdf()
+//        {
+//            Document acDoc = Application.DocumentManager.MdiActiveDocument;
+//            Editor ed = acDoc.Editor;
+
+//            // Prompt for number of columns
+//            PromptIntegerOptions columnOptions = new PromptIntegerOptions("\nEnter number of columns: ")
+//            {
+//                AllowNegative = false,
+//                AllowZero = false
+//            };
+//            PromptIntegerResult columnResult = ed.GetInteger(columnOptions);
+//            if (columnResult.Status != PromptStatus.OK) return;
+
+//            int columns = columnResult.Value;
+
+//            // Prompt for number of rows
+//            PromptIntegerOptions rowOptions = new PromptIntegerOptions("\nEnter number of rows: ")
+//            {
+//                AllowNegative = false,
+//                AllowZero = false
+//            };
+//            PromptIntegerResult rowResult = ed.GetInteger(rowOptions);
+//            if (rowResult.Status != PromptStatus.OK) return;
+
+//            int rows = rowResult.Value;
+
+//            // Ensure the "PDFs" folder exists
+//            string pdfFolderPath = EnsurePdfFolderExists(acDoc);
+
+//            var rectangles = GetUserDefinedRectangles(ed);
+//            if (rectangles == null || rectangles.Count == 0)
+//            {
+//                ed.WriteMessage("No rectangles defined or operation cancelled by the user.");
+//                return; // Exit if no rectangles or user cancelled
+//            }
+
+//            foreach (var rectangle in rectangles)
+//            {
+//                PlotRectangleToPdf(rectangle, pdfFolderPath, acDoc);
+//            }
+
+//            // If AutoCAD or a third-party library supports combining PDFs, invoke that here
+//        }
+
+//        private string EnsurePdfFolderExists(Document acDoc)
+//        {
+//            string dwgFilePath = acDoc.Name;
+//            string dwgDirectory = Path.GetDirectoryName(dwgFilePath);
+//            string pdfFolderPath = Path.Combine(dwgDirectory, "PDFs");
+//            if (!Directory.Exists(pdfFolderPath))
+//            {
+//                Directory.CreateDirectory(pdfFolderPath);
+//            }
+//            return pdfFolderPath;
+//        }
+
+//        private void PlotRectangleToPdf(Point3d[] rectangleCorners, string pdfFolderPath, Document acDoc)
+//        {
+//            if (rectangleCorners == null || rectangleCorners.Length != 2)
+//            {
+//                throw new ArgumentException("Rectangle corners must be an array of two Point3d objects.");
+//            }
+
+//            // Extract lower-left and upper-right points
+//            Point3d lowerLeft = rectangleCorners[0];
+//            Point3d upperRight = rectangleCorners[1];
+
+//            LayoutManager lm = LayoutManager.Current;
+//            string currentLayout = lm.CurrentLayout;
+//            ObjectId layoutId = lm.GetLayoutId(currentLayout);
+
+//            using (Transaction tr = acDoc.Database.TransactionManager.StartTransaction())
+//            {
+//                var plotInfo = new PlotInfo();
+//                plotInfo.Layout = layoutId;
+
+//                var plotSettings = new PlotSettings(true);
+//                var plotSettingsValidator = PlotSettingsValidator.Current;
+
+//                // Configure plot settings as before
+//                plotSettingsValidator.SetPlotType(plotSettings, Autodesk.AutoCAD.DatabaseServices.PlotType.Window);
+
+//                // Use standard scale 
+//                plotSettingsValidator.SetUseStandardScale(plotSettings, true);
+
+//                // Scale the plot to fit the rectangle created by the user
+//                plotSettingsValidator.SetStdScaleType(plotSettings, StdScaleType.ScaleToFit);
+
+//                // Set the plot units for custom layouts
+//                plotSettingsValidator.SetPlotPaperUnits(plotSettings, PlotPaperUnit.Millimeters);
+
+//                // Plot Rotation
+//                plotSettingsValidator.SetPlotRotation(plotSettings, PlotRotation.Degrees000);
+
+//                // Set the plot device to the desired printer
+//                plotSettingsValidator.SetPlotConfigurationName(plotSettings, "DWG To PDF.pc3", "ISO_A4_(210.00_x_297.00_MM)");
+
+//                // Centered flag to see if the plis considered centered
+//                plotSettingsValidator.SetPlotCentered(plotSettings, true);
+
+//                // Set the plot style to const global string
+//                plotSettingsValidator.SetCurrentStyleSheet(plotSettings, PlotStyleTable);
+
+//                // Set the plot window using the lower-left and upper-right points
+//                plotSettingsValidator.SetPlotWindowArea(plotSettings, new Extents2d(lowerLeft.X, lowerLeft.Y, upperRight.X, upperRight.Y));
+                
 
 
-            // Register the application
-            RegistryKey regAppAddInKey = regAcadAppKey.CreateSubKey(sAppName);
-            regAppAddInKey.SetValue("DESCRIPTION", sAppName, MSREG.RegistryValueKind.String);
-            regAppAddInKey.SetValue("LOADCTRLS", 2, MSREG.RegistryValueKind.DWord);
-            regAppAddInKey.SetValue("LOADER", sAssemblyPath, MSREG.RegistryValueKind.String);
-            regAppAddInKey.SetValue("MANAGED", 1, MSREG.RegistryValueKind.DWord);
 
-            regAcadAppKey.Close();
-        }
+//                plotInfo.OverrideSettings = plotSettings;
 
-        [CommandMethod("UnregisterMyApp")]
-        public void UnregisterMyApp()
-        {
-            // Get the AutoCAD Applications key
-            string sProdKey = HostApplicationServices.Current.MachineRegistryProductRootKey;
-            string sAppName = "MyApp";
+//                using (var pe = PlotFactory.CreatePublishEngine())
+//                {
+//                    using (var plotProgress = new PlotProgressDialog(false, 1, true))
+//                    {
+//                        plotProgress.set_PlotMsgString(PlotMessageIndex.DialogTitle, "Custom Plot Progress");
 
-            RegistryKey regAcadProdKey = Registry.CurrentUser.OpenSubKey(sProdKey);
-            RegistryKey regAcadAppKey = regAcadProdKey.OpenSubKey("Applications", true);
+//                        pe.BeginPlot(plotProgress, null);
 
-            // Delete the key for the application
-            regAcadAppKey.DeleteSubKeyTree(sAppName);
-            regAcadAppKey.Close();
-        }
+//                        // Define the plot output
+//                        var plotFileName = Path.Combine(pdfFolderPath, $"{Guid.NewGuid()}.pdf");
+//                        pe.BeginDocument(plotInfo, acDoc.Name, null, 1, true, plotFileName);
 
-    }
-}
+//                        var pageSetup = new PlotPageInfo();
+//                        pe.BeginPage(pageSetup, plotInfo, true, null);
+//                        pe.BeginGenerateGraphics(null);
+//                        pe.EndGenerateGraphics(null);
+
+//                        // End the plot
+//                        pe.EndPage(null);
+//                        pe.EndDocument(null);
+//                        pe.EndPlot(null);
+//                    }
+//                }
+
+//                tr.Commit();
+//            }
+//        }
+
+
+//        // Placeholder for the method to get rectangles based on user input
+//        private List<Point3d[]> GetUserDefinedRectangles(Editor ed)
+//        {
+//            List<Point3d[]> rectangles = new List<Point3d[]>();
+
+//            PromptPointResult pprLowerLeft = ed.GetPoint("\nSelect lower-left corner: ");
+//            if (pprLowerLeft.Status != PromptStatus.OK) return null;
+
+//            PromptPointOptions ppoUpperRight = new PromptPointOptions("\nSelect upper-right corner: ")
+//            {
+//                UseBasePoint = true,
+//                BasePoint = pprLowerLeft.Value
+//            };
+//            PromptPointResult pprUpperRight = ed.GetPoint(ppoUpperRight);
+//            if (pprUpperRight.Status != PromptStatus.OK) return null;
+
+//            // Adjusted to include offsets
+//            Point3d lowerLeft = new Point3d(pprLowerLeft.Value.X - offsetx, pprLowerLeft.Value.Y - offsety, pprLowerLeft.Value.Z);
+//            Point3d upperRight = new Point3d(pprUpperRight.Value.X + offsetx, pprUpperRight.Value.Y + offsety, pprUpperRight.Value.Z);
+
+//            rectangles.Add(new Point3d[] { lowerLeft, upperRight });
+
+//            return rectangles;
+//        }
+
+//    }
+//}
