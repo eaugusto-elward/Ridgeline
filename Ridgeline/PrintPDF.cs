@@ -6,6 +6,7 @@ using Autodesk.AutoCAD.Runtime;
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading.Tasks;
 
@@ -20,35 +21,49 @@ namespace Ridgeline
         double plotUpperRightX = 0.0; // Upper right corner of the plot area
         double plotUpperRightY = 0.0; // Upper right corner of the plot area
 
+        [DllImport("PrintPDF_DLL.dll")]
+        private static extern void PrintPDFConsole(double lowerLeftX, double lowerLeftY, double upperRightX, double upperRightY);
+
         [CommandMethod("SelectCorners")]
         public void SelectCorners()
         {
 
             UpdateActiveDocument(); // Update the active document and editor
 
+            // Prompt the user for the number of columns
+            double colnum = PromptForReal("\nHow many COLUMNS(||)?: ");
+            if (double.IsNaN(colnum))
+            {
+                return;
+            }
+            Editor.WriteMessage("\nColumns Entered: " + colnum.ToString());
 
             // Prompt the user for the number of rows
             double rownum = PromptForReal("\nHow many ROWS(-)?: ");
             if (double.IsNaN(rownum))
             {
-                Editor.WriteMessage("\nRows Entered: ");
                 return;
             }
+            Editor.WriteMessage("\nRows Entered: " + rownum.ToString());
 
-            // Prompt the user for the number of columns
-            double colnum = PromptForReal("\nHow many COLUMNS(||)?: ");
-            if (double.IsNaN(colnum))
-                return;
+
+
 
             // Prompt the user to select the lower-left corner of the first cell
             Point3d? Point1 = PromptForStartPoint("\nSelect the LOWER LEFT corner of the 1st cell: ");
             if (Point1 == null)
+            {
                 return;
+            }
+            // Print the lower left corner point to console
+            Editor.WriteMessage("\nLower Left Corner: " + Point1.Value.ToString());
 
             // Prompt the user to select the upper-right corner of the first cell
             Point3d? Point2 = PromptForCorner(Point1.Value, "\nSelect the UPPER RIGHT corner of the 1st cell: ");
             if (Point2 == null)
                 return;
+            // Print the upper right corner point to console
+            Editor.WriteMessage("\nUpper Right Corner: " + Point2.Value.ToString());
 
             // Calculate block dimensions
             double blockx = Math.Abs(Point1.Value.X - Point2.Value.X);
@@ -62,7 +77,11 @@ namespace Ridgeline
             SetPlotArea(Point1.Value, Point2.Value);
 
 
-            // Further processing or use of calculated values
+            // Now we bring in the C++ code to print the PDF and set the plot area.
+            // I would like to pass the plot area values to the C++ code, but I am not sure how to do that.
+            //Then I want to set the plot area settings in the c++ code and print the PDF.
+
+            PrintPDFConsole(plotLowerLeftX, plotLowerLeftY, plotUpperRightX, plotUpperRightY);
         }
 
         private double PromptForReal(string message)
