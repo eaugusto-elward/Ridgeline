@@ -1,13 +1,14 @@
 #include "pch.h"
 #include "printpdf.h"
+#include "acutads.h"
+#include "acedads.h" // Include the header for acedAlert
+#include "dbmain.h" // Include the header for AcDbEntity
+
 #include <iostream>
 #include <string>
-
-using namespace std;
 
 // Function to print PDF and set plot area
 extern "C" __declspec(dllexport) void PrintPDFConsole(double lowerLeftX, double lowerLeftY, double upperRightX, double upperRightY)
 {
-    // Implement your printing to PDF logic here
-    cout << "Printing PDF with plot area: (" << lowerLeftX << ", " << lowerLeftY << ") to (" << upperRightX << ", " << upperRightY << ")" << endl;
+	acutPrintf(L"Hello, World!\n");
 }

@@ -270,8 +270,8 @@ namespace MyFirstCadPlugin
                 PlotSettingsValidator acPlSetVdr = PlotSettingsValidator.Current;
 
                 // Set the Plotter and page size
-                acPlSetVdr.SetPlotConfigurationName(plSet, "DWF6 ePlot.pc3",
-                                                    "ANSI_A_(8.50_x_11.00_Inches)");
+                acPlSetVdr.SetPlotConfigurationName(plSet, "Bluebeam PDF",
+                                                    "Letter");
 
                 acDoc.Editor.WriteMessage("\nCanonical and Local media names: ");
 
