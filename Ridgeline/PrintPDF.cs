@@ -44,10 +44,6 @@ namespace Ridgeline
             int rownum = 0;
             int colnum = 0;
 
-            getDrawingType(ed, printVar);
-            getRowsCols(ed, rownum, colnum);
-            getPrintBox(ed);
-
         }
 
         public void getDrawingType(Editor ed, string printVar)
@@ -65,48 +61,14 @@ namespace Ridgeline
 
         public void getRowsCols(Editor ed, int rownum, int colnum)
         {
-            rownum = PromptForInteger(ed, "\nHow many ROWS(-)?: ");
-            colnum = PromptForInteger(ed, "\nHow many COLUMNS(||)?: ");
+            rownum = PromptForInteger("\nHow many ROWS(-)?: ");
+            colnum = PromptForInteger("\nHow many COLUMNS(||)?: ");
         }
 
-        public void getPrintBox(Editor ed)
+        public void getPrintBox()
         {
-            Point3d pt1 = PromptForPoint(ed, "\nSelect the LOWER LEFT corner of the 1st cell: ");
-            Point3d pt2 = PromptForPoint(ed, "\nSelect the UPPER RIGHT corner of the 1st cell: ");
-        }
-
-
-        private static int PromptForInteger(Editor ed, string message)
-        {
-
-            PromptIntegerOptions options = new PromptIntegerOptions(message)
-            {
-                AllowNone = false,
-                AllowZero = false,
-                AllowNegative = false
-            };
-            PromptIntegerResult result = ed.GetInteger(options);
-            return result.Value;
-        }
-
-        private static Point3d PromptForPoint(Editor ed, string message)
-        {
-
-            PromptPointOptions options = new PromptPointOptions(message);
-            PromptPointResult result = ed.GetPoint(options);
-            return result.Value;
-        }
-
-        private static string PromptForSavePath(Editor ed)
-        {
-
-            PromptSaveFileOptions options = new PromptSaveFileOptions("\nSelect Save Directory & Name")
-            {
-                Filter = "PDF files (*.pdf)|*.pdf",
-                InitialDirectory = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments)
-            };
-            PromptFileNameResult result = ed.GetFileNameForSave(options);
-            return result.StringResult;
+            Point3d pt1 = PromptForPoint("\nSelect the LOWER LEFT corner of the 1st cell: ");
+            Point3d pt2 = PromptForPoint("\nSelect the UPPER RIGHT corner of the 1st cell: ");
         }
     }
 }
