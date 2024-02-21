@@ -2,11 +2,15 @@
 using Autodesk.AutoCAD.DatabaseServices;
 using Autodesk.AutoCAD.EditorInput;
 using Autodesk.AutoCAD.Geometry;
+using Autodesk.AutoCAD.PlottingServices;
 using Autodesk.AutoCAD.Runtime;
 using System;
 using System.Collections.Generic;
+using System.Collections.Specialized;
+using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
+using System.Runtime.Remoting.Messaging;
 using System.Text;
 using System.Threading.Tasks;
 
@@ -14,151 +18,97 @@ namespace Ridgeline
 {
     public class PrintPDF
     {
-        string pageName = "Page"; // File name base value. Will be apprended with sequential numbers
-        string pageCounter = "001"; // Counter for file name
-        double plotLowerLeftX = 0.0; // Lower left corner of the plot area
-        double plotLowerLeftY = 0.0; // Lower left corner of the plot area
-        double plotUpperRightX = 0.0; // Upper right corner of the plot area
-        double plotUpperRightY = 0.0; // Upper right corner of the plot area
 
-        [DllImport("PrintPDF_DLL.dll")]
-        private static extern void PrintPDFConsole(double lowerLeftX, double lowerLeftY, double upperRightX, double upperRightY);
-
-        [CommandMethod("SelectCorners")]
-        public void SelectCorners()
+        [CommandMethod("PDFA")]
+        public void printPDFA()
         {
+            //Algorithm
+            /*
+             *Get Input from user for what layers to use
+             *Get Input from user for what rows
+             *Get Input from user for what columns
+             *Get Input from user for the lower left and upper right corner
+             *Set the file and name for savings
+             *Switch case for the print var settings
+             *
+             *Cycle through each of the print window locations
+             *Print with settings definited by the switch case
+             */
+            
+            Document doc = Application.DocumentManager.MdiActiveDocument;
+            Database db = doc.Database;
+            Editor ed = doc.Editor;
+            
+            string printVar = "";
 
-            UpdateActiveDocument(); // Update the active document and editor
+            int rownum = 0;
+            int colnum = 0;
 
-            // Prompt the user for the number of columns
-            double colnum = PromptForReal("\nHow many COLUMNS(||)?: ");
-            if (double.IsNaN(colnum))
-            {
-                return;
-            }
-            Editor.WriteMessage("\nColumns Entered: " + colnum.ToString());
+            getDrawingType(ed, printVar);
+            getRowsCols(ed, rownum, colnum);
+            getPrintBox(ed);
 
-            // Prompt the user for the number of rows
-            double rownum = PromptForReal("\nHow many ROWS(-)?: ");
-            if (double.IsNaN(rownum))
-            {
-                return;
-            }
-            Editor.WriteMessage("\nRows Entered: " + rownum.ToString());
-
-
-
-
-            // Prompt the user to select the lower-left corner of the first cell
-            Point3d? Point1 = PromptForStartPoint("\nSelect the LOWER LEFT corner of the 1st cell: ");
-            if (Point1 == null)
-            {
-                return;
-            }
-            // Print the lower left corner point to console
-            Editor.WriteMessage("\nLower Left Corner: " + Point1.Value.ToString());
-
-            // Prompt the user to select the upper-right corner of the first cell
-            Point3d? Point2 = PromptForCorner(Point1.Value, "\nSelect the UPPER RIGHT corner of the 1st cell: ");
-            if (Point2 == null)
-                return;
-            // Print the upper right corner point to console
-            Editor.WriteMessage("\nUpper Right Corner: " + Point2.Value.ToString());
-
-            // Calculate block dimensions
-            double blockx = Math.Abs(Point1.Value.X - Point2.Value.X);
-            double blocky = Math.Abs(Point1.Value.Y - Point2.Value.Y);
-
-            // Lower left corner values
-            double lowerLeftX = Point1.Value.X;
-            double lowerLeftY = Point1.Value.Y;
-
-            // Set the plot area
-            SetPlotArea(Point1.Value, Point2.Value);
-
-
-            // Now we bring in the C++ code to print the PDF and set the plot area.
-            // I would like to pass the plot area values to the C++ code, but I am not sure how to do that.
-            //Then I want to set the plot area settings in the c++ code and print the PDF.
-
-            PrintPDFConsole(plotLowerLeftX, plotLowerLeftY, plotUpperRightX, plotUpperRightY);
         }
 
-        private double PromptForReal(string message)
+        public void getDrawingType(Editor ed, string printVar)
         {
-            PromptDoubleOptions options = new PromptDoubleOptions(message);
-            PromptDoubleResult result = Editor.GetDouble(options);
+            PromptStringOptions printVarOptions = new PromptStringOptions("\nAssembly(A), Cut(C) or Both(B), None(N)? Default (B): ")
+            {
+                AllowSpaces = false,
+                DefaultValue = "B",
+                UseDefaultValue = true
+            };
+            printVar = ed.GetString(printVarOptions).StringResult.ToUpper();
 
-            if (result.Status == PromptStatus.OK)
-            {
-                return result.Value;
-            }
-            else
-            {
-                return double.NaN;
-            }
+            ed.WriteMessage("\nYou selected: " + printVar);
+        }
+
+        public void getRowsCols(Editor ed, int rownum, int colnum)
+        {
+            rownum = PromptForInteger(ed, "\nHow many ROWS(-)?: ");
+            colnum = PromptForInteger(ed, "\nHow many COLUMNS(||)?: ");
+        }
+
+        public void getPrintBox(Editor ed)
+        {
+            Point3d pt1 = PromptForPoint(ed, "\nSelect the LOWER LEFT corner of the 1st cell: ");
+            Point3d pt2 = PromptForPoint(ed, "\nSelect the UPPER RIGHT corner of the 1st cell: ");
         }
 
 
-        private Point3d? PromptForStartPoint(string message)
+        private static int PromptForInteger(Editor ed, string message)
         {
+
+            PromptIntegerOptions options = new PromptIntegerOptions(message)
+            {
+                AllowNone = false,
+                AllowZero = false,
+                AllowNegative = false
+            };
+            PromptIntegerResult result = ed.GetInteger(options);
+            return result.Value;
+        }
+
+        private static Point3d PromptForPoint(Editor ed, string message)
+        {
+
             PromptPointOptions options = new PromptPointOptions(message);
-            PromptPointResult result = Editor.GetPoint(options);
+            PromptPointResult result = ed.GetPoint(options);
+            return result.Value;
+        }
 
-            if (result.Status == PromptStatus.OK)
+        private static string PromptForSavePath(Editor ed)
+        {
+
+            PromptSaveFileOptions options = new PromptSaveFileOptions("\nSelect Save Directory & Name")
             {
-                return result.Value;
-            }
-            else
-            {
-                return null;
-            }
-        }
-
-        private Point3d? PromptForCorner(Point3d start, string message)
-        {
-            PromptCornerOptions options = new PromptCornerOptions(message, start);
-            PromptPointResult result = Editor.GetCorner(options);
-
-            if (result.Status == PromptStatus.OK)
-            {
-                return result.Value;
-            }
-            else
-            {
-                return null;
-            }
-        }
-
-        // Objects required for active document and editor
-        // Keeping at bottom of class for readability
-        private Document _document; // backing field for Document property
-        public Document Document // property to access active document
-        {
-            get => _document;
-            set => _document = value;
-        }
-
-        private Editor _editor; // backing field for Editor property
-        public Editor Editor // property to access active editor
-        {
-            get => _editor;
-            set => _editor = value;
-        }
-
-        // Update the active document and editor. To be called at the start of every [Commandmethod]
-        private void UpdateActiveDocument()
-        {
-            Document = Application.DocumentManager.MdiActiveDocument;
-            Editor = Document.Editor;
-        }
-
-        private void SetPlotArea(Point3d lowerLeft, Point3d upperRight)
-        {
-            plotLowerLeftX = lowerLeft.X;
-            plotLowerLeftY = lowerLeft.Y;
-            plotUpperRightX = upperRight.X;
-            plotUpperRightY = upperRight.Y;
+                Filter = "PDF files (*.pdf)|*.pdf",
+                InitialDirectory = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments)
+            };
+            PromptFileNameResult result = ed.GetFileNameForSave(options);
+            return result.StringResult;
         }
     }
 }
+
+
