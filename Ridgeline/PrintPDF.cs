@@ -5,15 +5,6 @@ using Autodesk.AutoCAD.Geometry;
 using Autodesk.AutoCAD.PlottingServices;
 using Autodesk.AutoCAD.Runtime;
 using System;
-using System.Collections.Generic;
-using System.Collections.Specialized;
-using System.IO;
-using System.Linq;
-using System.Runtime.InteropServices;
-using System.Runtime.InteropServices.ComTypes;
-using System.Runtime.Remoting.Messaging;
-using System.Text;
-using System.Threading.Tasks;
 
 namespace Ridgeline
 {
@@ -97,7 +88,7 @@ namespace Ridgeline
             {
                 for (int col = 1; col <= colnum; col++)
                 {
-                    PlotCurrentView(doc, filename, row, col, pt1, blockx, blocky);
+                    PlotCurrentView(doc, db, filename, row, col, pt1, blockx, blocky);
                 }
             }
             ed.WriteMessage("\nHave a nice day!");
@@ -182,15 +173,17 @@ namespace Ridgeline
         }
 
         // Plot the current view
-        private void PlotCurrentView(Document doc, string fileName, int row, int col, Point3d basePoint, double width, double height)
+        private void PlotCurrentView(Document doc, Database db, string fileName, int row, int col, Point3d basePoint, double width, double height)
         {
             using (Transaction tr = doc.Database.TransactionManager.StartTransaction())
             {
 
-                LayoutManager lm = LayoutManager.Current;
+                LayoutManager lm = LayoutManager.Current;             
                 string currentLayoutName = lm.CurrentLayout;
                 ObjectId layoutId = lm.GetLayoutId(currentLayoutName);
                 Layout layoutObj = (Layout)tr.GetObject(layoutId, OpenMode.ForRead);
+
+                BlockTableRecord btr = (BlockTableRecord)tr.GetObject(db.CurrentSpaceId, OpenMode.ForRead);
 
                 PlotInfo pi = new PlotInfo();
                 pi.Layout = layoutId; // Use the ObjectId of the layout directly
