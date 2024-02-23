@@ -60,6 +60,7 @@
   <ItemGroup>
     <Compile Include="Active.cs" />
     <Compile Include="AppFunctions.cs" />
+    <Compile Include="Class1.cs" />
     <Compile Include="PrintPDF.cs" />
     <Compile Include="Commands.cs" />
     <Compile Include="Main.cs" />
