@@ -1,299 +1,266 @@
-﻿//using Autodesk.AutoCAD.ApplicationServices;
-//using Autodesk.AutoCAD.DatabaseServices;
-//using Autodesk.AutoCAD.EditorInput;
-//using Autodesk.AutoCAD.Geometry;
-//using Autodesk.AutoCAD.PlottingServices;
-//using Autodesk.AutoCAD.Runtime;
-//using System;
-//using System.Collections.Generic;
-//using System.IO;
-//using System.Runtime.InteropServices;
+﻿using Autodesk.AutoCAD.ApplicationServices;
+using Autodesk.AutoCAD.DatabaseServices;
+using Autodesk.AutoCAD.EditorInput;
+using Autodesk.AutoCAD.Geometry;
+using Autodesk.AutoCAD.PlottingServices;
+using Autodesk.AutoCAD.Runtime;
+using System;
+using System.Collections.Specialized;
+using System.IO;
+using System.Runtime.InteropServices;
+using WinForms = System.Windows.Forms;
 
 
-//namespace Ridgeline
-//{
-//    public class PrintPDF
-//    {
-//        [DllImport("accore.dll", CallingConvention = CallingConvention.Cdecl, EntryPoint = "acedTrans")]
-//        static extern int acedTrans(double[] point, IntPtr fromRb, IntPtr toRb, int disp, double[] result);
-
-//        string plotterName = "Bluebeam PDF"; // Plotter name for the PDF plotter
-//        string mediaName = "Letter"; // Media name for the PDF plotter
-//        string plotStyle = "acad.ctb"; // Plot style for the PDF plotter
-//        static string filename = "default";   // String that captures the user input for the file name and location
-//        string printVar = "";   // String that captures the user input for the layer visibility for printing
-//        Point3d lowerLeft;   // Starting boundary point for the print window. For conversion from 3d to 2d
-//        Point3d upperRight;    // Ending boundary point for the print window. For conversion from 3d to 2d
-//        Extents2d window;   // The print window location
-//        int rownum = 0; // Used for calculation how many times to translate the print window over the X-Axis
-//        int colnum = 0; // Used for calculation how many times to translate the print window over the Y-Axis
+namespace Ridgeline
+{
+    public class PrintPDF
+    {
+        static string plotterName = "Bluebeam PDF";
+        static string mediaName = "ANSI_expand_A_(8.50_x_11.00_Inches)";
+        static string plotStyle = "acad.ctb";
 
 
-//        [CommandMethod("PDFA")]
-//        public void printPDFA()
-//        {
-//            // Active document objects
-//            Document doc = Application.DocumentManager.MdiActiveDocument;
-//            Database db = doc.Database;
-//            Editor ed = doc.Editor;
-//            PlotInfo pi = null;  // Putting this in the method scope to avoid the "unassigned variable" and avoid data clobbering
-//            using (Transaction tr = db.TransactionManager.StartTransaction())
-//            {
+        [DllImport("accore.dll", CallingConvention = CallingConvention.Cdecl, EntryPoint = "acedTrans")]
+        static extern int acedTrans(double[] point, IntPtr fromRb, IntPtr toRb, int disp, double[] result);
 
+        [CommandMethod("PDFX")]
+        static public void plotterscaletofit()
+        {
+            Document doc = Application.DocumentManager.MdiActiveDocument;
+            Editor ed = doc.Editor;
+            Database db = doc.Database;
 
+            using (Transaction tr = db.TransactionManager.StartTransaction())
+            {
+                //ask user for print window
+                Point3d first;
+                PromptPointOptions ppo = new PromptPointOptions("\nSelect First corner of plot area: ");
+                ppo.AllowNone = false;
+                PromptPointResult ppr = ed.GetPoint(ppo);
+                if (ppr.Status == PromptStatus.OK)
+                { first = ppr.Value; }
+                else
+                    return;
 
+                Point3d second;
+                PromptCornerOptions pco = new PromptCornerOptions("\nSelect second corner of the plot area.", first);
+                ppr = ed.GetCorner(pco);
+                if (ppr.Status == PromptStatus.OK)
+                { second = ppr.Value; }
+                else
+                    return;
 
+                //convert from UCS to DCS
+                Extents2d window = coordinates(first, second);
 
+                //if the current view is paperspace then need to set up a viewport first
+                if (LayoutManager.Current.CurrentLayout != "Model")
+                { }
 
-//                /* Main method calls */
-//                getDrawingType(ed, ref printVar);   // Get user input for the printVar
+                //set up the plotter
+                PlotInfo pi = plotSetUp(window, tr, db, ed);
 
-//                getRowsCols(ed, ref rownum, ref colnum);    // Get user input for the number of rows and columns
+                //call plotter engine to run
+                plotEngine(pi, "Nameless", doc, ed);
 
-//                getPrintBox(ed);    // Get user input for the initial print window location
+                tr.Dispose();
+            }
+        }
 
-//                //PromptForSavePath(ed, ref filename);   // Get user input for the file name and location
-
-//                // Switch case for the printVar settings
-//                switch (printVar)
-//                {
-//                    case "A":
-//                        printVar = "A";
-//                        break;
-//                    case "C":
-//                        printVar = "C";
-//                        break;
-//                    case "B":
-//                        printVar = "B";
-//                        break;
-//                    case "N":
-//                        printVar = "N";
-//                        break;
-//                    default:
-//                        printVar = "B";
-//                        break;
-//                }
-
-
-//                window = convertCoordinates(lowerLeft, upperRight);  // Returns an updated Extents2d object for every print window location
-//                pi = plotSetup(window, tr, db, ed);  // Set plot settings with new window location
-//                plotEngine(pi, ref filename, doc, ed, (rownum * colnum));      // Plot the window location
-
-//                // Loop through each of the print window locations
-//                for (int row = 1; row <= rownum; row++)
-//                {
-//                    for (int col = 1; col <= colnum; col++)
-//                    {
-
+        // A PlotEngine does the actual plotting
+        // (can also create one for Preview)
+        //***NOTE- always be sure that back ground plotting is off, in code and the users computer.
+        static void plotEngine(PlotInfo pi, string name, Document doc, Editor ed)
+        {
+            if (PlotFactory.ProcessPlotState == ProcessPlotState.NotPlotting)
+            {
+                PlotEngine pe = PlotFactory.CreatePublishEngine();
+                using (pe)
+                {
+                    // Create a Progress Dialog to provide info or allow the user to cancel
+                    PlotProgressDialog ppd = new PlotProgressDialog(false, 1, true);
+                    using (ppd)
+                    {
                         
-//                                                                                       //Translate window location by column
+                        ppd.set_PlotMsgString(PlotMessageIndex.DialogTitle, "Custom Plot Progress");
+                        ppd.set_PlotMsgString(PlotMessageIndex.CancelJobButtonMessage, "Cancel Job");
+                        ppd.set_PlotMsgString(PlotMessageIndex.CancelSheetButtonMessage, "Cancel Sheet");
+                        ppd.set_PlotMsgString(PlotMessageIndex.SheetSetProgressCaption, "Sheet Set Progress");
+                        ppd.set_PlotMsgString(PlotMessageIndex.SheetProgressCaption, "Sheet Progress");
+                        ppd.LowerPlotProgressRange = 0;
+                        ppd.UpperPlotProgressRange = 100;
+                        ppd.PlotProgressPos = 0;
 
-//                    }
-//                    //Translate window location by row
-//                }
-//                ed.WriteMessage("\nHave a nice day!");
-//            }
+                        // Let's start the plot, at last
+                        ppd.OnBeginPlot();
+                        ppd.IsVisible = true;
+                        pe.BeginPlot(ppd, null);
 
-//        }
+                        // We'll be plotting a single document
+                        //name should be file location + prompeted answer
+                        string fileLoc = Path.GetDirectoryName(doc.Name);
+                        pe.BeginDocument(pi, doc.Name, null, 1, false, fileLoc + @"\" + name);
 
-//        // Get user input for the printVar
-//        public void getDrawingType(Editor ed, ref string printVar)
-//        {
-//            PromptStringOptions printVarOptions = new PromptStringOptions("\nAssembly(A), Cut(C) or Both(B), None(N)? Default (B): ")
-//            {
-//                AllowSpaces = false,
-//                DefaultValue = "B",
-//                UseDefaultValue = true
-//            };
-//            printVar = ed.GetString(printVarOptions).StringResult.ToUpper();
+                        // Which contains a single sheet
+                        ppd.OnBeginSheet();
+                        ppd.LowerSheetProgressRange = 0;
+                        ppd.UpperSheetProgressRange = 100;
+                        ppd.SheetProgressPos = 0;
 
-//            ed.WriteMessage("\nYou selected: " + printVar);
-//        }
+                        PlotPageInfo ppi = new PlotPageInfo();
+                        pe.BeginPage(ppi, pi, true, null);
+                        
+                        pe.BeginGenerateGraphics(null);
+                        pe.EndGenerateGraphics(null);
 
-//        // Get user input for the number of rows and columns
-//        public void getRowsCols(Editor ed, ref int rownum, ref int colnum)
-//        {
-//            rownum = PromptForInteger(ed, "\nHow many ROWS?: ");
-//            colnum = PromptForInteger(ed, "\nHow many COLUMNS?: ");
-//        }
+                        // Finish the sheet
+                        pe.EndPage(null);
+                        ppd.SheetProgressPos = 100;
+                        ppd.OnEndSheet();
 
-//        // Get user input for the initial print window location
-//        public void getPrintBox(Editor ed)
-//        {
+                        // Finish the document
+                        pe.EndDocument(null);
 
-//            // Get user input for the print window location
-//            PromptPointOptions ppo = new PromptPointOptions("\nSelect lower left corner of print window: ");
-//            ppo.AllowNone = false;
-//            PromptPointResult ppr = ed.GetPoint(ppo);
-//            if (ppr.Status != PromptStatus.OK) return;  // Check for Error, return if error
-//            lowerLeft = ppr.Value;
+                        // And finish the plot
+                        ppd.PlotProgressPos = 100;
+                        ppd.OnEndPlot();
+                        pe.EndPlot(null);
+                    }
+                }
+            }
 
-//            PromptCornerOptions pco = new PromptCornerOptions("\nSelect upper right corner of print window: ", lowerLeft);
-//            ppr = ed.GetCorner(pco);
-//            if (ppr.Status != PromptStatus.OK) return;  // Check for Error, return if error
-//            upperRight = ppr.Value;
+            else
+            {
+                ed.WriteMessage("\nAnother plot is in progress.");
+            }
+        }
 
-//        }
+        //acquire the extents of the frame and convert them from UCS to DCS, in case of view rotation
+        static public Extents2d coordinates(Point3d firstInput, Point3d secondInput)
+        {
+            double lowerLeftX = firstInput.X;
+            double lowerLeftY = firstInput.Y;
+            double upperRightX = secondInput.X;
+            double upperRightY = secondInput.Y;
 
-//        // Service function for 'getRowsCols'
-//        private static int PromptForInteger(Editor ed, string message)
-//        {
+            //sort through the values to be sure that the correct first and second are assigned
+            //if (firstInput.X < secondInput.X)
+            //{ minX = firstInput.X; maxX = secondInput.X; }
+            //else
+            //{ maxX = firstInput.X; minX = secondInput.X; }
 
-//            PromptIntegerOptions options = new PromptIntegerOptions(message)
-//            {
-//                AllowNone = false,
-//                AllowZero = false,
-//                AllowNegative = false
-//            };
-//            PromptIntegerResult result = ed.GetInteger(options);
-//            return result.Value;
-//        }
+            //if (firstInput.Y < secondInput.Y)
+            //{ minY = firstInput.Y; maxY = secondInput.Y; }
+            //else
+            //{ maxY = firstInput.Y; minY = secondInput.Y; }
 
-//        // Get user input for the file name and location
-//        // public void PromptForSavePath(Editor ed, ref string filename)
-//        //{
 
-//        //    PromptSaveFileOptions options = new PromptSaveFileOptions("\nSelect Save Directory & Name")
-//        //    {
-//        //        Filter = "PDF files (*.pdf)|*.pdf",
-//        //        InitialDirectory = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments) // TODO: Set to the desired default directory to be the document working directory
-//        //    };
-//        //    PromptFileNameResult result = ed.GetFileNameForSave(options);
-//        //    if (result.Status == PromptStatus.OK) // Check if the user clicked OK
-//        //    {
-//        //        filename = result.StringResult; // Assign the selected file name to filename
-//        //    }
-//        //    else
-//        //    {
-//        //        filename = "defaultFileName.pdf"; // Example default value assignment TODO: Evalute the need for this case checking
-//        //    }
-//        //}
+            //Point3d first = new Point3d(lowerLeftX, lowerLeftY, 0);
+            //Point3d second = new Point3d(upperRightX, upperRightY, 0);
+            ////converting numbers to something the system uses (DCS) instead of UCS
+            //ResultBuffer rbFrom = new ResultBuffer(new TypedValue(5003, 1)), rbTo = new ResultBuffer(new TypedValue(5003, 2));
+            //double[] firres = new double[] { 0, 0, 0 };
+            //double[] secres = new double[] { 0, 0, 0 };
+            ////convert points
+            //acedTrans(first.ToArray(), rbFrom.UnmanagedObject, rbTo.UnmanagedObject, 0, firres);
+            //acedTrans(second.ToArray(), rbFrom.UnmanagedObject, rbTo.UnmanagedObject, 0, secres);
+            //Extents2d window = new Extents2d(firres[0], firres[1], secres[0], secres[1]);
+            Extents2d window = new Extents2d(lowerLeftX, lowerLeftY, upperRightX, upperRightY);
 
-//        // Convert 3d coordinates to 2d coordinates
-//        public Extents2d convertCoordinates(Point3d lowerLeft, Point3d upperRight)
-//        {
-//            ResultBuffer rbFrom = new ResultBuffer(new TypedValue(5003, 1)), rbTo = new ResultBuffer(new TypedValue(5003, 2));
-//            double[] firres = new double[] { 0, 0, 0 };
-//            double[] secres = new double[] { 0, 0, 0 };
-//            //convert points
-//            acedTrans(lowerLeft.ToArray(), rbFrom.UnmanagedObject, rbTo.UnmanagedObject, 0, firres);
-//            acedTrans(upperRight.ToArray(), rbFrom.UnmanagedObject, rbTo.UnmanagedObject, 0, secres);
-//            Extents2d window = new Extents2d(firres[0], firres[1], secres[0], secres[1]);
+            return window;
+        }
 
-//            return window;
+        static public PlotRotation orientation(Extents2d ext)
+        {
+            PlotRotation portrait = PlotRotation.Degrees180;
+            PlotRotation landscape = PlotRotation.Degrees270;
+            double width = ext.MinPoint.X - ext.MaxPoint.X;
+            double height = ext.MinPoint.Y - ext.MaxPoint.Y;
+            if (Math.Abs(width) > Math.Abs(height))
+            { return landscape; }
+            else
+            { return portrait; }
+        }
 
-//        }
+        //set up plotinfo
+        static public PlotInfo plotSetUp(Extents2d window, Transaction tr, Database db, Editor ed)
+        {
+            using (tr)
+            {
+                BlockTableRecord btr = (BlockTableRecord)tr.GetObject(db.CurrentSpaceId, OpenMode.ForRead);
+                // We need a PlotInfo object linked to the layout
+                PlotInfo pi = new PlotInfo();
+                pi.Layout = btr.LayoutId;
 
-//        // Set plot settings. This method is called for each print window location
-//        public PlotInfo plotSetup(Extents2d window, Transaction tr, Database db, Editor ed)
-//        {
-//            using (tr)
-//            {
-//                // New block table record to manage layout copy
-//                BlockTableRecord btr = (BlockTableRecord)tr.GetObject(db.CurrentSpaceId, OpenMode.ForRead);
-//                // New PlotInfo to be linked to the layout
-//                PlotInfo pi = new PlotInfo();
-//                pi.Layout = btr.LayoutId;
+                //current layout
+                Layout lo = (Layout)tr.GetObject(btr.LayoutId, OpenMode.ForRead);
+                
 
-//                // Get the current layout and assign to object
-//                Layout lo = (Layout)tr.GetObject(btr.LayoutId, OpenMode.ForRead);
+                // We need a PlotSettings object based on the layout settings which we then customize
+                PlotSettings ps = new PlotSettings(lo.ModelType);
+                ps.CopyFrom(lo);
+                
+                //The PlotSettingsValidator helps create a valid PlotSettings object
+                PlotSettingsValidator psv = PlotSettingsValidator.Current;
 
-//                // Create plot settings object to pass to validator
-//                PlotSettings ps = new PlotSettings(lo.ModelType);
-//                ps.CopyFrom(lo);
+                //set rotation
+                psv.SetPlotRotation(ps, orientation(window));
+                
 
-//                // Create new plot settings validator object
-//                PlotSettingsValidator psv = PlotSettingsValidator.Current;
 
-//                // Set area rotation
-//                psv.SetPlotRotation(ps, PlotRotation.Degrees000);
+                // We'll plot the window, centered, scaled, landscape rotation
+                psv.SetPlotWindowArea(ps, window);
+                psv.SetPlotType(ps, Autodesk.AutoCAD.DatabaseServices.PlotType.Window);//breaks here on some drawings                
+                
+                // Set the plot scale
+                psv.SetUseStandardScale(ps, true);
 
-//                // Set window area, scale and offset
-//                psv.SetPlotWindowArea(ps, window);
-//                psv.SetPlotType(ps, Autodesk.AutoCAD.DatabaseServices.PlotType.Window);
-//                psv.SetStdScaleType(ps, StdScaleType.ScaleToFit);
-//                psv.SetPlotCentered(ps, true);
+                psv.SetStdScaleType(ps, StdScaleType.ScaleToFit);
 
-//                psv.RefreshLists(ps);   // Appears in other libraries before setting configuration name. Not sure if necessary
 
-//                // Set plot device to PDF
-//                psv.SetPlotConfigurationName(ps, plotterName, mediaName);
+                // Center the plot
+                psv.SetPlotCentered(ps, true);//finding best location
 
-//                psv.RefreshLists(ps);   // Has to be set before setting the plot style
+                //get printerName from system settings
+                //PrinterSettings settings = new PrinterSettings();
+                //string defaultPrinterName = settings.PrinterName;
 
-//                // Set plot style
-//                psv.SetCurrentStyleSheet(ps, plotStyle);
+                psv.RefreshLists(ps);
+                // Set Plot device & page size 
+                psv.SetPlotConfigurationName(ps, "Bluebeam PDF", "Letter");
 
-//                pi.OverrideSettings = ps;
-//                PlotInfoValidator piv = new PlotInfoValidator();
-//                piv.MediaMatchingPolicy = MatchingPolicy.MatchEnabled;
-//                piv.Validate(pi);
 
-//                return pi;
-//            }
-//        }
+                //rebuilts plotter, plot style, and canonical media lists
+                //(must be called before setting the plot style)
+                psv.RefreshLists(ps);
+                //psv.SetPlotRotation(ps, PlotRotation.Degrees090);
+                //ps.ShadePlot = PlotSettingsShadePlotType.AsDisplayed;
+                //ps.ShadePlotResLevel = ShadePlotResLevel.Normal;
 
-//        static void plotEngine(PlotInfo pi, ref string name, Document doc, Editor ed, int progressNum)
-//        {
-//            if (PlotFactory.ProcessPlotState == ProcessPlotState.NotPlotting)
-//            {
-//                PlotEngine pe = PlotFactory.CreatePublishEngine();
-//                using (pe)
-//                {
-//                    // Create a Progress Dialog to provide info or allow the user to cancel
-//                    PlotProgressDialog ppd = new PlotProgressDialog(false, 1, true);
-//                    using (ppd)
-//                    {
-//                        ppd.set_PlotMsgString(PlotMessageIndex.DialogTitle, "Elward Plot Progress");
-//                        ppd.set_PlotMsgString(PlotMessageIndex.CancelJobButtonMessage, "Cancel Job");
-//                        ppd.set_PlotMsgString(PlotMessageIndex.CancelSheetButtonMessage, "Cancel Sheet");
-//                        ppd.set_PlotMsgString(PlotMessageIndex.SheetSetProgressCaption, "Elward Block Progress");
-//                        ppd.set_PlotMsgString(PlotMessageIndex.SheetProgressCaption, "Block Progress");
-//                        ppd.LowerPlotProgressRange = 0;
-//                        ppd.UpperPlotProgressRange = progressNum;   // Default 100 
-//                        ppd.PlotProgressPos = 0;
+                //plot options
+                //ps.PrintLineweights = true;
+                //ps.PlotTransparency = false;
+                //ps.PlotPlotStyles = true;
+                //ps.DrawViewportsFirst = true;
+                //ps.CurrentStyleSheet
 
-//                        // Let's start the plot, at last
-//                        ppd.OnBeginPlot();
-//                        ppd.IsVisible = true;
-//                        pe.BeginPlot(ppd, null);
+                // Use only on named layouts - Hide paperspace objects option
+                // ps.PlotHidden = true;
 
-//                        // We'll be plotting a single document
-//                        //name should be file location + prompeted answer
-//                        string fileLoc = Path.GetDirectoryName(doc.Name);
-//                        pe.BeginDocument(pi, doc.Name, null, 1, true, fileLoc + @"\" + filename);
+                psv.SetPlotRotation(ps, PlotRotation.Degrees000);
 
-//                        // Which contains a single sheet
-//                        ppd.OnBeginSheet();
-//                        ppd.LowerSheetProgressRange = 0;
-//                        ppd.UpperSheetProgressRange = progressNum;
-//                        ppd.SheetProgressPos = 0;
 
-//                        PlotPageInfo ppi = new PlotPageInfo();
-//                        pe.BeginPage(ppi, pi, true, null);
-//                        pe.BeginGenerateGraphics(null);
-//                        pe.EndGenerateGraphics(null);
+                //plot table needs to be the custom heavy lineweight for the Uphol specs 
+                psv.SetCurrentStyleSheet(ps, "acad.ctb");
 
-//                        // Finish the sheet
-//                        pe.EndPage(null);
-//                        ppd.SheetProgressPos = progressNum;
-//                        ppd.OnEndSheet();
+                // We need to link the PlotInfo to the  PlotSettings and then validate it
+                pi.OverrideSettings = ps;
+                PlotInfoValidator piv = new PlotInfoValidator();
+                piv.MediaMatchingPolicy = MatchingPolicy.MatchEnabled;
+                piv.Validate(pi);
 
-//                        // Finish the document
-//                        pe.EndDocument(null);
-
-//                        // And finish the plot
-//                        ppd.PlotProgressPos = progressNum;
-//                        ppd.OnEndPlot();
-//                        pe.EndPlot(null);
-//                    }
-//                }
-//            }
-
-//            else
-//            {
-//                ed.WriteMessage("\nAnother plot is in progress.");
-//            }
-//        }
-//    }
-//}
+                return pi;
+            }
+        }
+    }
+}
