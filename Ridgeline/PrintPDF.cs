@@ -15,11 +15,6 @@ namespace Ridgeline
 {
     public class PrintPDF
     {
-        static string plotterName = "Bluebeam PDF";
-        static string mediaName = "ANSI_expand_A_(8.50_x_11.00_Inches)";
-        static string plotStyle = "acad.ctb";
-
-
         [DllImport("accore.dll", CallingConvention = CallingConvention.Cdecl, EntryPoint = "acedTrans")]
         static extern int acedTrans(double[] point, IntPtr fromRb, IntPtr toRb, int disp, double[] result);
 
@@ -58,19 +53,30 @@ namespace Ridgeline
                 { }
 
                 //set up the plotter
-                PlotInfo pi = plotSetUp(window, tr, db, ed);
+                PlotInfo pi = plotSetUp(window, tr, db, ed, true, false);
 
                 //call plotter engine to run
-                plotEngine(pi, "Nameless", doc, ed);
+                plotEngine(pi, "Nameless", doc, ed, false);
 
                 tr.Dispose();
             }
         }
 
+        //create a viewport so that plotting from the paperspace is possibe
+        static public void makeViewPort(Extents3d window)
+        {
+            Viewport acVport = new Viewport();
+            acVport.Width = window.MaxPoint.X - window.MinPoint.X;
+            acVport.Height = window.MaxPoint.Y - window.MinPoint.Y;
+            acVport.CenterPoint = new Point3d(acVport.Width / 2 + window.MinPoint.X,
+                acVport.Height / 2 + window.MinPoint.Y,
+                0); //dist/2 +minpoint
+        }
+
         // A PlotEngine does the actual plotting
         // (can also create one for Preview)
         //***NOTE- always be sure that back ground plotting is off, in code and the users computer.
-        static void plotEngine(PlotInfo pi, string name, Document doc, Editor ed)
+        static void plotEngine(PlotInfo pi, string name, Document doc, Editor ed, bool pdfout)
         {
             if (PlotFactory.ProcessPlotState == ProcessPlotState.NotPlotting)
             {
@@ -81,7 +87,6 @@ namespace Ridgeline
                     PlotProgressDialog ppd = new PlotProgressDialog(false, 1, true);
                     using (ppd)
                     {
-                        
                         ppd.set_PlotMsgString(PlotMessageIndex.DialogTitle, "Custom Plot Progress");
                         ppd.set_PlotMsgString(PlotMessageIndex.CancelJobButtonMessage, "Cancel Job");
                         ppd.set_PlotMsgString(PlotMessageIndex.CancelSheetButtonMessage, "Cancel Sheet");
@@ -99,7 +104,7 @@ namespace Ridgeline
                         // We'll be plotting a single document
                         //name should be file location + prompeted answer
                         string fileLoc = Path.GetDirectoryName(doc.Name);
-                        pe.BeginDocument(pi, doc.Name, null, 1, false, fileLoc + @"\" + name);
+                        pe.BeginDocument(pi, doc.Name, null, 1, pdfout, fileLoc + @"\" + name);
 
                         // Which contains a single sheet
                         ppd.OnBeginSheet();
@@ -109,7 +114,6 @@ namespace Ridgeline
 
                         PlotPageInfo ppi = new PlotPageInfo();
                         pe.BeginPage(ppi, pi, true, null);
-                        
                         pe.BeginGenerateGraphics(null);
                         pe.EndGenerateGraphics(null);
 
@@ -138,42 +142,42 @@ namespace Ridgeline
         //acquire the extents of the frame and convert them from UCS to DCS, in case of view rotation
         static public Extents2d coordinates(Point3d firstInput, Point3d secondInput)
         {
-            double lowerLeftX = firstInput.X;
-            double lowerLeftY = firstInput.Y;
-            double upperRightX = secondInput.X;
-            double upperRightY = secondInput.Y;
+            double minX;
+            double minY;
+            double maxX;
+            double maxY;
 
             //sort through the values to be sure that the correct first and second are assigned
-            //if (firstInput.X < secondInput.X)
-            //{ minX = firstInput.X; maxX = secondInput.X; }
-            //else
-            //{ maxX = firstInput.X; minX = secondInput.X; }
+            if (firstInput.X < secondInput.X)
+            { minX = firstInput.X; maxX = secondInput.X; }
+            else
+            { maxX = firstInput.X; minX = secondInput.X; }
 
-            //if (firstInput.Y < secondInput.Y)
-            //{ minY = firstInput.Y; maxY = secondInput.Y; }
-            //else
-            //{ maxY = firstInput.Y; minY = secondInput.Y; }
+            if (firstInput.Y < secondInput.Y)
+            { minY = firstInput.Y; maxY = secondInput.Y; }
+            else
+            { maxY = firstInput.Y; minY = secondInput.Y; }
 
 
-            //Point3d first = new Point3d(lowerLeftX, lowerLeftY, 0);
-            //Point3d second = new Point3d(upperRightX, upperRightY, 0);
-            ////converting numbers to something the system uses (DCS) instead of UCS
-            //ResultBuffer rbFrom = new ResultBuffer(new TypedValue(5003, 1)), rbTo = new ResultBuffer(new TypedValue(5003, 2));
-            //double[] firres = new double[] { 0, 0, 0 };
-            //double[] secres = new double[] { 0, 0, 0 };
-            ////convert points
-            //acedTrans(first.ToArray(), rbFrom.UnmanagedObject, rbTo.UnmanagedObject, 0, firres);
-            //acedTrans(second.ToArray(), rbFrom.UnmanagedObject, rbTo.UnmanagedObject, 0, secres);
-            //Extents2d window = new Extents2d(firres[0], firres[1], secres[0], secres[1]);
-            Extents2d window = new Extents2d(lowerLeftX, lowerLeftY, upperRightX, upperRightY);
+            Point3d first = new Point3d(minX, minY, 0);
+            Point3d second = new Point3d(maxX, maxY, 0);
+            //converting numbers to something the system uses (DCS) instead of UCS
+            ResultBuffer rbFrom = new ResultBuffer(new TypedValue(5003, 1)), rbTo = new ResultBuffer(new TypedValue(5003, 2));
+            double[] firres = new double[] { 0, 0, 0 };
+            double[] secres = new double[] { 0, 0, 0 };
+            //convert points
+            acedTrans(first.ToArray(), rbFrom.UnmanagedObject, rbTo.UnmanagedObject, 0, firres);
+            acedTrans(second.ToArray(), rbFrom.UnmanagedObject, rbTo.UnmanagedObject, 0, secres);
+            Extents2d window = new Extents2d(firres[0], firres[1], secres[0], secres[1]);
 
             return window;
         }
 
+        //determine if the plot is landscape or portrait based on which side is longer
         static public PlotRotation orientation(Extents2d ext)
         {
-            PlotRotation portrait = PlotRotation.Degrees180;
-            PlotRotation landscape = PlotRotation.Degrees270;
+            PlotRotation portrait = PlotRotation.Degrees000;    //Changed from deg180 to deg 000. Functionality to be added in later - EA
+            PlotRotation landscape = PlotRotation.Degrees000;   //changed from deg270 to deg 000. Functionality to be added in later - EA
             double width = ext.MinPoint.X - ext.MaxPoint.X;
             double height = ext.MinPoint.Y - ext.MaxPoint.Y;
             if (Math.Abs(width) > Math.Abs(height))
@@ -183,7 +187,7 @@ namespace Ridgeline
         }
 
         //set up plotinfo
-        static public PlotInfo plotSetUp(Extents2d window, Transaction tr, Database db, Editor ed)
+        static public PlotInfo plotSetUp(Extents2d window, Transaction tr, Database db, Editor ed, bool scaleToFit, bool pdfout)
         {
             using (tr)
             {
@@ -194,29 +198,27 @@ namespace Ridgeline
 
                 //current layout
                 Layout lo = (Layout)tr.GetObject(btr.LayoutId, OpenMode.ForRead);
-                
 
                 // We need a PlotSettings object based on the layout settings which we then customize
                 PlotSettings ps = new PlotSettings(lo.ModelType);
                 ps.CopyFrom(lo);
-                
+
                 //The PlotSettingsValidator helps create a valid PlotSettings object
                 PlotSettingsValidator psv = PlotSettingsValidator.Current;
 
                 //set rotation
-                psv.SetPlotRotation(ps, orientation(window));
-                
-
+                psv.SetPlotRotation(ps, orientation(window)); //perhaps put orientation after window setting window??
 
                 // We'll plot the window, centered, scaled, landscape rotation
                 psv.SetPlotWindowArea(ps, window);
                 psv.SetPlotType(ps, Autodesk.AutoCAD.DatabaseServices.PlotType.Window);//breaks here on some drawings                
-                
+
                 // Set the plot scale
                 psv.SetUseStandardScale(ps, true);
-
-                psv.SetStdScaleType(ps, StdScaleType.ScaleToFit);
-
+                if (scaleToFit == true)
+                { psv.SetStdScaleType(ps, StdScaleType.ScaleToFit); }
+                else
+                { psv.SetStdScaleType(ps, StdScaleType.StdScale1To1); }
 
                 // Center the plot
                 psv.SetPlotCentered(ps, true);//finding best location
@@ -226,14 +228,34 @@ namespace Ridgeline
                 //string defaultPrinterName = settings.PrinterName;
 
                 psv.RefreshLists(ps);
-                // Set Plot device & page size 
-                psv.SetPlotConfigurationName(ps, "Bluebeam PDF", "Letter");
 
+                /* Commented out PDF checking if statement. All documents to be Bluebeam PDF at this time - EA */
+                /***********************************************************************************************/
+                // Set Plot device & page size 
+                // if PDF set it up for some PDF plotter
+                //if (pdfout == true)
+                //{
+                //    psv.SetPlotConfigurationName(ps, "DWG to PDF.pc3", null);
+                //    var mns = psv.GetCanonicalMediaNameList(ps);
+                //    if (mns.Contains("ANSI_expand_A_(8.50_x_11.00_Inches)"))
+                //    { psv.SetCanonicalMediaName(ps, "ANSI_expand_A_(8.50_x_11.00_Inches)"); }
+                //    else
+                //    { string mediaName = setClosestMediaName(psv, ps, 8.5, 11, true); }
+                //}
+                //else
+                //{
+                    psv.SetPlotConfigurationName(ps, "Bluebeam PDF", "Letter");
+                    var mns = psv.GetCanonicalMediaNameList(ps);
+                    if (mns.Contains("Letter"))
+                    { psv.SetCanonicalMediaName(ps, "Letter"); }
+                    else
+                    { string mediaName = setClosestMediaName(psv, ps, 8.5, 11, true); }
+                //}
 
                 //rebuilts plotter, plot style, and canonical media lists
                 //(must be called before setting the plot style)
                 psv.RefreshLists(ps);
-                //psv.SetPlotRotation(ps, PlotRotation.Degrees090);
+
                 //ps.ShadePlot = PlotSettingsShadePlotType.AsDisplayed;
                 //ps.ShadePlotResLevel = ShadePlotResLevel.Normal;
 
@@ -247,7 +269,7 @@ namespace Ridgeline
                 // Use only on named layouts - Hide paperspace objects option
                 // ps.PlotHidden = true;
 
-                psv.SetPlotRotation(ps, PlotRotation.Degrees000);
+                //psv.SetPlotRotation(ps, PlotRotation.Degrees180);
 
 
                 //plot table needs to be the custom heavy lineweight for the Uphol specs 
@@ -262,5 +284,90 @@ namespace Ridgeline
                 return pi;
             }
         }
+
+        //if the media size doesn't exist, this will search media list for best match
+        // 8.5 x 11 should be there
+        private static string setClosestMediaName(PlotSettingsValidator psv, PlotSettings ps,
+            double pageWidth, double pageHeight, bool matchPrintableArea)
+        {
+            //get all of the media listed for plotter
+            StringCollection mediaList = psv.GetCanonicalMediaNameList(ps);
+            double smallestOffest = 0.0;
+            string selectedMedia = string.Empty;
+            PlotRotation selectedRot = PlotRotation.Degrees000;
+
+            foreach (string media in mediaList)
+            {
+                psv.SetCanonicalMediaName(ps, media);
+
+                double mediaWidth = ps.PlotPaperSize.X;
+                double mediaHeight = ps.PlotPaperSize.Y;
+
+                if (matchPrintableArea)
+                {
+                    mediaWidth -= (ps.PlotPaperMargins.MinPoint.X + ps.PlotPaperMargins.MaxPoint.X);
+                    mediaHeight -= (ps.PlotPaperMargins.MinPoint.Y + ps.PlotPaperMargins.MaxPoint.Y);
+                }
+
+                PlotRotation rot = PlotRotation.Degrees090;
+
+                //check that we are not outside the media print area
+                if (mediaWidth < pageWidth || mediaHeight < pageHeight)
+                {
+                    //Check if turning paper will work
+                    if (mediaHeight < pageWidth || mediaWidth >= pageHeight)
+                    {
+                        //still too small
+                        continue;
+                    }
+                    rot = PlotRotation.Degrees090;
+                }
+
+                double offset = Math.Abs(mediaWidth * mediaHeight - pageWidth * pageHeight);
+
+                if (selectedMedia == string.Empty || offset < smallestOffest)
+                {
+                    selectedMedia = media;
+                    smallestOffest = offset;
+                    selectedRot = rot;
+
+                    if (smallestOffest == 0)
+                        break;
+                }
+            }
+            psv.SetCanonicalMediaName(ps, selectedMedia);
+            psv.SetPlotRotation(ps, selectedRot);
+            return selectedMedia;
+        }
+    }
+
+    //iMessage filter from Kean Walmsley(Through the interface) to let the jig be rotated while jigging
+    public class TxtRotMsgFilter : WinForms.IMessageFilter
+    {
+        [DllImport("user32.dll", CharSet = CharSet.Auto, ExactSpelling = true)]
+
+        public static extern short GetKeyState(int keyCode);
+
+        const int WM_KEYDOWN = 256;
+        const int VK_CONTROL = 17;
+
+        private Document _doc = null;
+
+        public TxtRotMsgFilter(Document doc)
+        { _doc = doc; }
+
+        public bool PreFilterMessage(ref WinForms.Message m)
+        {
+            if (
+                m.Msg == WM_KEYDOWN &&
+                m.WParam == (IntPtr)WinForms.Keys.Tab &&
+                GetKeyState(VK_CONTROL) >= 0)
+            {
+                _doc.SendStringToExecute("_RO", true, false, false);
+                return true;
+            }
+            return false;
+        }
+
     }
 }

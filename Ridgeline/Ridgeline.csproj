@@ -61,6 +61,7 @@
     <Compile Include="Active.cs" />
     <Compile Include="AppFunctions.cs" />
     <Compile Include="Class1 - Copy.cs" />
+    <Compile Include="Class2.cs" />
     <Compile Include="PrintPDF.cs" />
     <Compile Include="Commands.cs" />
     <Compile Include="Main.cs" />
