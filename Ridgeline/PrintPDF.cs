@@ -5,10 +5,11 @@ using Autodesk.AutoCAD.Geometry;
 using Autodesk.AutoCAD.PlottingServices;
 using Autodesk.AutoCAD.Runtime;
 using System;
+using System.Collections.Generic;
 using System.Collections.Specialized;
 using System.IO;
 using System.Runtime.InteropServices;
-using WinForms = System.Windows.Forms;
+
 
 
 namespace Ridgeline
@@ -244,12 +245,12 @@ namespace Ridgeline
                 //}
                 //else
                 //{
-                    psv.SetPlotConfigurationName(ps, "Bluebeam PDF", "Letter");
-                    var mns = psv.GetCanonicalMediaNameList(ps);
-                    if (mns.Contains("Letter"))
-                    { psv.SetCanonicalMediaName(ps, "Letter"); }
-                    else
-                    { string mediaName = setClosestMediaName(psv, ps, 8.5, 11, true); }
+                psv.SetPlotConfigurationName(ps, "Bluebeam PDF", "Letter");
+                var mns = psv.GetCanonicalMediaNameList(ps);
+                if (mns.Contains("Letter"))
+                { psv.SetCanonicalMediaName(ps, "Letter"); }
+                else
+                { string mediaName = setClosestMediaName(psv, ps, 8.5, 11, true); }
                 //}
 
                 //rebuilts plotter, plot style, and canonical media lists
@@ -341,33 +342,221 @@ namespace Ridgeline
         }
     }
 
-    //iMessage filter from Kean Walmsley(Through the interface) to let the jig be rotated while jigging
-    public class TxtRotMsgFilter : WinForms.IMessageFilter
+    public class PrintPDFTwo
+
     {
-        [DllImport("user32.dll", CharSet = CharSet.Auto, ExactSpelling = true)]
+        static int inputRows = 1; // This variable is to capture user input for the number of rows to plot
+        static int inputColumns = 1; // This variable is to capture user input for the number of columns to plot
+        
+        // These two are for iterating over the rows and columns of titleblocks
+        static int currentRow = 1;
+        static int currentColumn = 1;
 
-        public static extern short GetKeyState(int keyCode);
+        // Index variables to track current location for the List arrays
+        static int currentWindow = 0;
+        static int currentPoint = 0;
 
-        const int WM_KEYDOWN = 256;
-        const int VK_CONTROL = 17;
+        // These two are for calculating the width and height of the plot area
+        static double plotBoxHeight = 0.0;
+        static double plotBoxWidth = 0.0;
 
-        private Document _doc = null;
+        // This list stores all points for the window plot area
+        // Index [0] is the lower left corner of the window
+        // Index [1] is the upper right corner of the window
+        // This pattern repeats for each window. The first two indexes are always the user input
+        static List<Point3d> points = new List<Point3d>();
 
-        public TxtRotMsgFilter(Document doc)
-        { _doc = doc; }
+        // This list stores all the plot windows
+        // The first in the list is the first window based off of user input
+        static List<Extents2d> plotWindows = new List<Extents2d>();
 
-        public bool PreFilterMessage(ref WinForms.Message m)
+
+        // This is from late night magic coding while inebriated. It helps control the orientation of the plot.
+        // I'm not sure what made me go this route, but it works and I don't want to mess with it. - EA
+        [DllImport("accore.dll", CallingConvention = CallingConvention.Cdecl, EntryPoint = "acedTrans")]
+        static extern int acedTrans(double[] point, IntPtr fromRb, IntPtr toRb, int disp, double[] result);
+
+
+        [CommandMethod("PDFZ")]
+        public static void PDFA()
         {
-            if (
-                m.Msg == WM_KEYDOWN &&
-                m.WParam == (IntPtr)WinForms.Keys.Tab &&
-                GetKeyState(VK_CONTROL) >= 0)
+            // Main method
+
+            // Open document objects for using in document database transactions
+            Document doc = Application.DocumentManager.MdiActiveDocument;
+            Editor ed = doc.Editor;
+            Database db = doc.Database;
+
+            // Clear and ensure its in memory
+            plotWindows.Clear();
+
+
+            using (Transaction tr = db.TransactionManager.StartTransaction())
             {
-                _doc.SendStringToExecute("_RO", true, false, false);
-                return true;
+                BlockTable bt = (BlockTable)tr.GetObject(db.BlockTableId, OpenMode.ForRead);
+
+                PlotInfo pi = new PlotInfo();
+                PlotInfoValidator piv = new PlotInfoValidator
+                {
+                    MediaMatchingPolicy = MatchingPolicy.MatchEnabled
+                };
+
+                // Check if a plot is already in progress
+                if (PlotFactory.ProcessPlotState == ProcessPlotState.NotPlotting)
+                {
+                    // Get the rows and columns of windows to plot
+                    inputRowCol(ed);
+
+                    // Get first window
+                    inputPoints(ed);
+                    addWindow();
+
+                    //convert from UCS to DCS
+                    //Extents2d window = convertToWindow(first, second);
+                    // Collection of Extents2d objects
+                    bool keepCollecting = true;
+                    while (keepCollecting)
+                    {
+
+
+                    }
+
+                    using (PlotEngine pe = PlotFactory.CreatePublishEngine())
+                    {
+                        using (PlotProgressDialog ppd = new PlotProgressDialog(false, 1, true))
+                        {
+                            
+                        }
+                    }
+                }
+                // Probably not needed. But it makes sense to me to have it here. - EA
+                tr.Dispose();
             }
-            return false;
         }
 
+        public static void inputPoints(Editor ed)
+        {
+            //ask user for print window
+            Point3d first;
+            PromptPointOptions ppo = new PromptPointOptions("\nSelect First corner of plot area: ");
+            ppo.AllowNone = false;
+            PromptPointResult ppr = ed.GetPoint(ppo);
+            if (ppr.Status == PromptStatus.OK)
+            { first = ppr.Value; }
+            else
+                return;
+
+
+            Point3d second;
+            PromptCornerOptions pco = new PromptCornerOptions("\nSelect second corner of the plot area.", first);
+            ppr = ed.GetCorner(pco);
+            if (ppr.Status == PromptStatus.OK)
+            { second = ppr.Value; }
+            else
+                return;
+            points.Add(first);
+            currentPoint++;
+            points.Add(second);
+            currentPoint++;
+
+        }
+
+
+        // This is a helper method to convert the points from UCS to DCS
+        // Combined with the interop above I copied this in part from another program. Much of the code is
+        // likely not needed. A window should just have the two points as 'double' values. - EA
+        public static Extents2d convertToWindow(Point3d firstNum, Point3d secondNum)
+        {
+            double minX;
+            double minY;
+            double maxX;
+            double maxY;
+
+            //sort through the values to be sure that the correct first and second are assigned
+            if (firstNum.X < secondNum.X)
+            { minX = firstNum.X; maxX = secondNum.X; }
+            else
+            { maxX = firstNum.X; minX = secondNum.X; }
+
+            if (firstNum.Y < secondNum.Y)
+            { minY = firstNum.Y; maxY = secondNum.Y; }
+            else
+            { maxY = firstNum.Y; minY = secondNum.Y; }
+
+            // Adds the width and height of the box to global variables
+            plotBoxWidth = Math.Abs(minX - maxX);
+            plotBoxHeight = Math.Abs(minY - maxY);
+
+            Point3d first = new Point3d(minX, minY, 0);
+            Point3d second = new Point3d(maxX, maxY, 0);
+            //converting numbers to something the system uses (DCS) instead of UCS
+            ResultBuffer rbFrom = new ResultBuffer(new TypedValue(5003, 1)), rbTo = new ResultBuffer(new TypedValue(5003, 2));
+            double[] firres = new double[] { 0, 0, 0 };
+            double[] secres = new double[] { 0, 0, 0 };
+            //convert points
+            acedTrans(first.ToArray(), rbFrom.UnmanagedObject, rbTo.UnmanagedObject, 0, firres);
+            acedTrans(second.ToArray(), rbFrom.UnmanagedObject, rbTo.UnmanagedObject, 0, secres);
+            Extents2d window = new Extents2d(firres[0], firres[1], secres[0], secres[1]);
+
+            return window;
+        }
+
+        public static void addWindow()
+        {
+            // Get the most recent index of the points list
+            int lastPoint = points.Count - 1;
+
+            // Add the two most recent points and put them in an extents2d object
+            plotWindows.Add(convertToWindow(points[lastPoint - 1], points[lastPoint]));
+
+            /*************************ELIOT ENDED HERE*/
+        }
+
+        // This gets user input to determine the number of rows and columns to plot
+        public static void inputRowCol(Editor ed)
+        {
+            // Prompt for the first integer
+            PromptIntegerOptions intOptions1 = new PromptIntegerOptions("\nEnter first integer: ")
+            {
+                AllowNegative = false,
+                AllowZero = true,
+                AllowNone = false
+            };
+            PromptIntegerResult intResult1 = ed.GetInteger(intOptions1);
+            if (intResult1.Status != PromptStatus.OK) return;
+            inputRows = intResult1.Value;
+
+            // Prompt for the second integer
+            PromptIntegerOptions intOptions2 = new PromptIntegerOptions("\nEnter second integer: ")
+            {
+                AllowNegative = false,
+                AllowZero = true,
+                AllowNone = false
+            };
+            PromptIntegerResult intResult2 = ed.GetInteger(intOptions2);
+            if (intResult2.Status != PromptStatus.OK) return;
+            inputColumns = intResult2.Value;
+        }
+
+
+        // This method will translate the plot area to the right
+        public static void translatePlotAreaRight()
+        {
+
+        }
+
+        // This method will translate the plot area down one row
+        public static void translatePlotAreaDown()
+        {
+            double[] bottomCorner = new double[] { 0, 0 };
+        }
+
+        // This method will act as a carridge return for the plot area. It will return the plot window to the start of the row
+        public static void returnPlotArea()
+        {
+
+        }
+
+        
     }
 }
