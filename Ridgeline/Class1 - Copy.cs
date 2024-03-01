@@ -435,7 +435,7 @@ namespace Ridgeline
                 { psv.SetStdScaleType(ps, StdScaleType.StdScale1To1); }
 
                 // Center the plot
-                psv.SetPlotCentered(ps, true);//finding best location
+                psv.SetPlotCentered(ps, true);  //finding best location
 
                 //get printerName from system settings
                 //PrinterSettings settings = new PrinterSettings();

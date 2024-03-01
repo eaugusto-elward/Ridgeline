@@ -9,6 +9,7 @@ using System.Collections.Generic;
 using System.Collections.Specialized;
 using System.IO;
 using System.Runtime.InteropServices;
+using System.Xml.Linq;
 
 
 
@@ -345,6 +346,15 @@ namespace Ridgeline
     public class PrintPDFTwo
 
     {
+        [CommandMethod("BoxMake")]
+        public static void boxMake()
+        {
+            Document doc = Application.DocumentManager.MdiActiveDocument;
+            Editor ed = doc.Editor;
+            // Make a rectangle with points at 0,0 and 2.5,4
+            ed.Command("_.RECTANG", new Point3d(0, 0, 0), new Point3d(2.5, 4, 0));
+        }
+
         static int inputRows = 1; // This variable is to capture user input for the number of rows to plot
         static int inputColumns = 1; // This variable is to capture user input for the number of columns to plot
 
@@ -353,7 +363,7 @@ namespace Ridgeline
         static int currentColumn = 1;
 
         // Index variables to track current location for the List arrays
-        static int currentWindow = 0;
+        static int currentPage = 1;
         static int currentPoint = 0;
 
         // These two are for calculating the width and height of the plot area
@@ -395,6 +405,9 @@ namespace Ridgeline
             using (Transaction tr = db.TransactionManager.StartTransaction())
             {
                 BlockTable bt = (BlockTable)tr.GetObject(db.BlockTableId, OpenMode.ForRead);
+
+                // This object is for the PlotInfo to get the layout ID
+                //ObjectId modelSpaceId = bt[BlockTableRecord.ModelSpace];
 
                 PlotInfo pi = new PlotInfo();
                 PlotInfoValidator piv = new PlotInfoValidator
@@ -450,15 +463,45 @@ namespace Ridgeline
 
                     }
 
-                    testRectangles(plotWindows, ed);
+                    //testRectangles(plotWindows, ed);
 
                     using (PlotEngine pe = PlotFactory.CreatePublishEngine())
                     {
                         using (PlotProgressDialog ppd = new PlotProgressDialog(false, 1, true))
                         {
+                            // Add each window to a sheet for the plot engine
+                            foreach (Extents2d window in plotWindows)
+                            {
 
+                                plotSettingsHelper(tr, db, ed, window, pi, piv);
+
+                                if (currentPage == 1)
+                                {
+                                    setupProgressDialog(ppd, plotWindows.Count);
+                                    pe.BeginPlot(ppd, null);
+
+                                    // Prompt the user for the file name
+                                    string fileLoc = Path.GetDirectoryName(doc.Name);
+
+                                    // The "nameless" comes from refactored code. It should be a user input - EA
+                                    pe.BeginDocument(pi, doc.Name, null, 1, false, fileLoc + @"\" + "Nameless");
+                                }
+
+                                //Plot each sheet
+                                plotSheet(ppd, pe, pi, doc, currentPage, plotWindows.Count);
+                                currentPage++;
+
+                            }
+                            pe.EndDocument(null);
+                            ppd.PlotProgressPos = 100;
+                            ppd.OnEndPlot();
+                            pe.EndPlot(null);
                         }
                     }
+                }
+                else
+                {
+                    ed.WriteMessage("\nAnother plot is in progress.");
                 }
                 tr.Commit();
                 // Probably not needed. But it makes sense to me to have it here. - EA
@@ -541,7 +584,7 @@ namespace Ridgeline
             // Add the two most recent points and put them in an extents2d object
             plotWindows.Add(convertToWindow(points[lastPoint - 1], points[lastPoint]));
 
-            
+
         }
 
         // This gets user input to determine the number of rows and columns to plot
@@ -600,6 +643,7 @@ namespace Ridgeline
             points.Add(second);
         }
 
+
         // Create a series of rectangle objects whos points will be the windows. Use either points or plotWindows
         public static void testRectangles(List<Extents2d> extentsList, Editor ed)
         {
@@ -614,6 +658,139 @@ namespace Ridgeline
             }
         }
 
-        /* ELIOT ENDED HERE. WORK ON THE BOX PLOT. SOMETHING AINT RIGHT. */
+        /* SOMETHING AINT RIGHT with testRectangles. I saw some strange interaction once where the testRectangles were created in quadrant 3 & 4, 
+         * and I haven't seen it again. That means there is a bug in here somewhere... - EA */
+
+        // Create the progress dialog. This is a helper method to keep the main method clean
+        // totalSheets should be a calculated number of inputRows * inputColumns
+        private static void setupProgressDialog(PlotProgressDialog ppd, int totalSheets)
+        {
+            ppd.set_PlotMsgString(PlotMessageIndex.DialogTitle, "Custom Plot Progress");
+            ppd.set_PlotMsgString(PlotMessageIndex.CancelJobButtonMessage, "Cancel Job");
+            ppd.set_PlotMsgString(PlotMessageIndex.CancelSheetButtonMessage, "Cancel Sheet");
+            ppd.set_PlotMsgString(PlotMessageIndex.SheetSetProgressCaption, "Sheet Set Progress");
+            ppd.set_PlotMsgString(PlotMessageIndex.SheetProgressCaption, "Sheet Progress");
+            ppd.LowerPlotProgressRange = 0;
+            ppd.UpperPlotProgressRange = 100;
+            ppd.PlotProgressPos = 0;
+
+            ppd.OnBeginPlot();
+            ppd.IsVisible = true;
+        }
+
+        // This method will add each window to a sheet for the plot engine
+        private static void plotSheet(PlotProgressDialog ppd, PlotEngine pe, PlotInfo pi, Document doc, int currentSheet, int totalSheets)
+        {
+            ppd.StatusMsgString = "Plotting " + doc.Name.Substring(doc.Name.LastIndexOf("\\") + 1) + " - sheet " + currentSheet.ToString() + " of " + totalSheets.ToString();
+
+            ppd.OnBeginSheet();
+            ppd.LowerSheetProgressRange = 0;
+            ppd.UpperSheetProgressRange = 100;
+            ppd.SheetProgressPos = 0;
+
+            PlotPageInfo ppi = new PlotPageInfo();
+            pe.BeginPage(ppi, pi, (currentSheet == totalSheets), null);
+            pe.BeginGenerateGraphics(null);
+            ppd.SheetProgressPos = 50;
+            pe.EndGenerateGraphics(null);
+
+            // Finish the sheet
+            pe.EndPage(null);
+            ppd.SheetProgressPos = 100;
+            ppd.OnEndSheet();
+        }
+
+        private static string setClosestMediaName(PlotSettingsValidator psv, PlotSettings ps,
+            double pageWidth, double pageHeight, bool matchPrintableArea)
+        {
+            //get all of the media listed for plotter
+            StringCollection mediaList = psv.GetCanonicalMediaNameList(ps);
+            double smallestOffest = 0.0;
+            string selectedMedia = string.Empty;
+            PlotRotation selectedRot = PlotRotation.Degrees000;
+
+            foreach (string media in mediaList)
+            {
+                psv.SetCanonicalMediaName(ps, media);
+
+                double mediaWidth = ps.PlotPaperSize.X;
+                double mediaHeight = ps.PlotPaperSize.Y;
+
+                if (matchPrintableArea)
+                {
+                    mediaWidth -= (ps.PlotPaperMargins.MinPoint.X + ps.PlotPaperMargins.MaxPoint.X);
+                    mediaHeight -= (ps.PlotPaperMargins.MinPoint.Y + ps.PlotPaperMargins.MaxPoint.Y);
+                }
+
+                PlotRotation rot = PlotRotation.Degrees090;
+
+                //check that we are not outside the media print area
+                if (mediaWidth < pageWidth || mediaHeight < pageHeight)
+                {
+                    //Check if turning paper will work
+                    if (mediaHeight < pageWidth || mediaWidth >= pageHeight)
+                    {
+                        //still too small
+                        continue;
+                    }
+                    rot = PlotRotation.Degrees090;
+                }
+
+                double offset = Math.Abs(mediaWidth * mediaHeight - pageWidth * pageHeight);
+
+                if (selectedMedia == string.Empty || offset < smallestOffest)
+                {
+                    selectedMedia = media;
+                    smallestOffest = offset;
+                    selectedRot = rot;
+
+                    if (smallestOffest == 0)
+                        break;
+                }
+            }
+            psv.SetCanonicalMediaName(ps, selectedMedia);
+            psv.SetPlotRotation(ps, selectedRot);
+            return selectedMedia;
+        }
+
+        public static void plotSettingsHelper(Transaction tr, Database db, Editor ed, Extents2d window, PlotInfo pi, PlotInfoValidator piv )
+        {
+            BlockTableRecord btr = (BlockTableRecord)tr.GetObject(db.CurrentSpaceId, OpenMode.ForRead);
+            Layout lo = (Layout)tr.GetObject(btr.LayoutId, OpenMode.ForRead);
+
+            PlotSettings ps = new PlotSettings(true);   // Pass true to indicate model space
+            ps.CopyFrom(lo);
+
+            PlotSettingsValidator psv = PlotSettingsValidator.Current;
+
+            // Set plot settings for each page
+            //psv.SetPlotRotation(ps, PlotRotation.Degrees000);
+            psv.SetPlotWindowArea(ps, window);
+            psv.SetPlotType(ps, Autodesk.AutoCAD.DatabaseServices.PlotType.Window);
+            psv.SetUseStandardScale(ps, true);
+            psv.SetStdScaleType(ps, StdScaleType.ScaleToFit);
+            psv.SetPlotCentered(ps, true);
+
+            // Adding at the bottom of the stack to see how it affects media rotation
+            psv.SetPlotRotation(ps, PlotRotation.Degrees000);
+
+            // Set plot device and page size
+            psv.SetPlotConfigurationName(ps, "Bluebeam PDF", "Letter");
+            var mns = psv.GetCanonicalMediaNameList(ps);
+            if (mns.Contains("Letter"))
+            { psv.SetCanonicalMediaName(ps, "Letter"); }
+            else
+            { string mediaName = setClosestMediaName(psv, ps, 8.5, 11, true); }
+
+            // Lock in settings. Maybe delete the refreshLists...Unsure of its purpose
+            // Older code bases seem to use it more than newer ones. I'm assuming it was needed and now
+            // the Validation might take care of it? I need to look into that further- EA
+            psv.RefreshLists(ps);
+
+            pi.Layout = btr.LayoutId;
+            LayoutManager.Current.CurrentLayout = lo.LayoutName;
+            pi.OverrideSettings = ps;
+            piv.Validate(pi);
+        }
     }
 }
