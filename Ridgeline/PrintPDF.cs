@@ -347,7 +347,7 @@ namespace Ridgeline
     {
         static int inputRows = 1; // This variable is to capture user input for the number of rows to plot
         static int inputColumns = 1; // This variable is to capture user input for the number of columns to plot
-        
+
         // These two are for iterating over the rows and columns of titleblocks
         static int currentRow = 1;
         static int currentColumn = 1;
@@ -389,6 +389,7 @@ namespace Ridgeline
 
             // Clear and ensure its in memory
             plotWindows.Clear();
+            points.Clear();
 
 
             using (Transaction tr = db.TransactionManager.StartTransaction())
@@ -417,18 +418,49 @@ namespace Ridgeline
                     bool keepCollecting = true;
                     while (keepCollecting)
                     {
+                        // Translate the plot area to the right
+                        translatePlotAreaRight();
+                        // Add most recent points to window list
+                        addWindow();
+                        currentColumn++;
 
+                        // Check to see if at end of row
+                        if (currentColumn == inputColumns)
+                        {
+                            if (currentRow == inputRows)
+                            {
+                                keepCollecting = false;
+                            }
+
+                            //I could rewrite this to make the logic structure less confusing. Checking the boolean value is a bit redundant
+                            // However, I don't want to rewrite everything right now. Its not elegant, but if the extra "if" statements create
+                            // enough of a performance hit then I have to do a lot better - EA
+                            if (keepCollecting)
+                            {
+                                // Reset column count and move to next row
+                                currentColumn = 1;
+
+                                // Move the plot area down and return to the start of the row. Add that plot area to the window list
+                                translatePlotAreaDownandReturn();
+                                addWindow();
+
+                                currentRow++;
+                            }
+                        }
 
                     }
+
+                    testRectangles(plotWindows, ed);
 
                     using (PlotEngine pe = PlotFactory.CreatePublishEngine())
                     {
                         using (PlotProgressDialog ppd = new PlotProgressDialog(false, 1, true))
                         {
-                            
+
                         }
                     }
                 }
+                tr.Commit();
                 // Probably not needed. But it makes sense to me to have it here. - EA
                 tr.Dispose();
             }
@@ -509,14 +541,14 @@ namespace Ridgeline
             // Add the two most recent points and put them in an extents2d object
             plotWindows.Add(convertToWindow(points[lastPoint - 1], points[lastPoint]));
 
-            /*************************ELIOT ENDED HERE*/
+            
         }
 
         // This gets user input to determine the number of rows and columns to plot
         public static void inputRowCol(Editor ed)
         {
             // Prompt for the first integer
-            PromptIntegerOptions intOptions1 = new PromptIntegerOptions("\nEnter first integer: ")
+            PromptIntegerOptions intOptions1 = new PromptIntegerOptions("\nEnter the numbers of rows: ")
             {
                 AllowNegative = false,
                 AllowZero = true,
@@ -527,7 +559,7 @@ namespace Ridgeline
             inputRows = intResult1.Value;
 
             // Prompt for the second integer
-            PromptIntegerOptions intOptions2 = new PromptIntegerOptions("\nEnter second integer: ")
+            PromptIntegerOptions intOptions2 = new PromptIntegerOptions("\nEnter the number of columns: ")
             {
                 AllowNegative = false,
                 AllowZero = true,
@@ -542,21 +574,46 @@ namespace Ridgeline
         // This method will translate the plot area to the right
         public static void translatePlotAreaRight()
         {
-
+            // Get the most recent index of the points list
+            int lastPoint = points.Count - 1;
+            // Get the two most recent points and move them to the right on the X axis by 1 box width
+            Point3d first = new Point3d(points[lastPoint - 1].X + plotBoxWidth, points[lastPoint - 1].Y, 0);
+            Point3d second = new Point3d(points[lastPoint].X + plotBoxWidth, points[lastPoint].Y, 0);
+            // Add the two most recent points and put them the points list
+            points.Add(first);
+            points.Add(second);
         }
 
         // This method will translate the plot area down one row
-        public static void translatePlotAreaDown()
+        public static void translatePlotAreaDownandReturn()
         {
-            double[] bottomCorner = new double[] { 0, 0 };
+            // Get the most recent index of the points list
+            int lastPoint = points.Count - 1;
+
+            // Variable for the count total width of the row. The first point only goes back 4 spaces. 
+            double calculatedWidth = (plotBoxWidth * inputColumns) - plotBoxWidth;
+
+            // Get the two most recent points, and move them down on the Y axis by 1 box height. Then move them back to the start of the row
+            Point3d first = new Point3d(points[lastPoint - 1].X - calculatedWidth, points[lastPoint - 1].Y - plotBoxHeight, 0);
+            Point3d second = new Point3d(points[lastPoint].X - calculatedWidth, points[lastPoint].Y - plotBoxHeight, 0);
+            points.Add(first);
+            points.Add(second);
         }
 
-        // This method will act as a carridge return for the plot area. It will return the plot window to the start of the row
-        public static void returnPlotArea()
+        // Create a series of rectangle objects whos points will be the windows. Use either points or plotWindows
+        public static void testRectangles(List<Extents2d> extentsList, Editor ed)
         {
+            for (int i = 0; i < points.Count; i += 2)
+            {
+                // Assuming each pair of points (i, i+1) defines a rectangle
+                Point3d lowerLeft = points[i];
+                Point3d upperRight = points[i + 1];
 
+                // Use the RECTANG command with the points as arguments
+                ed.Command("_.RECTANG", lowerLeft, upperRight);
+            }
         }
 
-        
+        /* ELIOT ENDED HERE. WORK ON THE BOX PLOT. SOMETHING AINT RIGHT. */
     }
 }
