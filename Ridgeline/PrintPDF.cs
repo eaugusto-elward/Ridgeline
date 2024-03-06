@@ -363,7 +363,7 @@ namespace Ridgeline
         static int currentColumn = 1;
 
         // Index variables to track current location for the List arrays
-        static int currentPage = 1;
+        static int currentPage = 0;
         static int currentPoint = 0;
 
         // These two are for calculating the width and height of the plot area
@@ -409,12 +409,6 @@ namespace Ridgeline
                 // This object is for the PlotInfo to get the layout ID
                 //ObjectId modelSpaceId = bt[BlockTableRecord.ModelSpace];
 
-                PlotInfo pi = new PlotInfo();
-                PlotInfoValidator piv = new PlotInfoValidator
-                {
-                    MediaMatchingPolicy = MatchingPolicy.MatchEnabled
-                };
-
                 // Check if a plot is already in progress
                 if (PlotFactory.ProcessPlotState == ProcessPlotState.NotPlotting)
                 {
@@ -425,9 +419,11 @@ namespace Ridgeline
                     inputPoints(ed);
                     addWindow();
 
+                    /* DO I NEED TO REFACTOR THIS CONVERSION METHOD?*/
                     //convert from UCS to DCS
                     //Extents2d window = convertToWindow(first, second);
-                    // Collection of Extents2d objects
+
+
                     bool keepCollecting = true;
                     while (keepCollecting)
                     {
@@ -465,45 +461,115 @@ namespace Ridgeline
 
                     //testRectangles(plotWindows, ed);
 
-                    using (PlotEngine pe = PlotFactory.CreatePublishEngine())
+                    PlotProgressDialog ppd = new PlotProgressDialog(false, plotWindows.Count, true);
+
+                    using (ppd)
                     {
-                        using (PlotProgressDialog ppd = new PlotProgressDialog(false, 1, true))
+                        ppd.OnBeginPlot();
+                        ppd.IsVisible = true;
+
+                        // Init the PlotEngine (once)
+                        PlotEngine pe = PlotFactory.CreatePublishEngine();
+                        pe.BeginPlot(ppd, null);
+
+                        ppd.StatusMsgString = "Plotting " + doc.Name.Substring(doc.Name.LastIndexOf("\\") + 1);
+
+                        ppd.OnBeginSheet();
+                        ppd.LowerSheetProgressRange = 0;
+                        ppd.UpperSheetProgressRange = 100;
+                        ppd.SheetProgressPos = 0;
+
+                        // Add each window to a sheet for the plot engine
+                        foreach (Extents2d window in plotWindows)
                         {
-                            // Add each window to a sheet for the plot engine
-                            foreach (Extents2d window in plotWindows)
+                            currentPage++;
+                            ppd.SheetProgressPos = currentPage * 100 / plotWindows.Count;
+
+                            //Create objects so PIV, PI and PS don't throw null reference exceptions
+                            BlockTableRecord btr = (BlockTableRecord)tr.GetObject(db.CurrentSpaceId, OpenMode.ForRead);
+                            Layout lo = (Layout)tr.GetObject(btr.LayoutId, OpenMode.ForRead);
+
+                            LayoutManager.Current.CurrentLayout = lo.LayoutName;
+
+                            PlotSettings ps = new PlotSettings(true);
+                            ps.CopyFrom(lo);
+
+                            PlotInfo pi = new PlotInfo();
+                            pi.Layout = btr.LayoutId;
+
+                            PlotSettingsValidator psv = PlotSettingsValidator.Current;
+
+                            // Set plot settings for each page
+                            //psv.SetPlotRotation(ps, PlotRotation.Degrees000);
+                            psv.SetPlotWindowArea(ps, window);
+                            psv.SetPlotType(ps, Autodesk.AutoCAD.DatabaseServices.PlotType.Window);
+                            psv.SetUseStandardScale(ps, true);
+                            psv.SetStdScaleType(ps, StdScaleType.ScaleToFit);
+                            psv.SetPlotCentered(ps, true);
+
+                            // Adding at the bottom of the stack to see how it affects media rotation
+                            // NEXT TURN OFF
+                            psv.SetPlotRotation(ps, PlotRotation.Degrees000);
+
+                            // Set plot device and page size
+                            psv.SetPlotConfigurationName(ps, "Bluebeam PDF", "Letter");
+                            var mns = psv.GetCanonicalMediaNameList(ps);
+                            if (mns.Contains("Letter"))
+                            { psv.SetCanonicalMediaName(ps, "Letter"); }
+                            else
+                            { string mediaName = setClosestMediaName(psv, ps, 8.5, 11, true); }
+
+                            // Lock in settings. Maybe delete the refreshLists...Unsure of its purpose
+                            // Older code bases seem to use it more than newer ones. I'm assuming it was needed and now
+                            // the Validation might take care of it? I need to look into that further- EA
+                            //psv.RefreshLists(ps);
+
+                            pi.OverrideSettings = ps;
+                            PlotInfoValidator piv = new PlotInfoValidator();
+                            piv.MediaMatchingPolicy = MatchingPolicy.MatchEnabled;
+                            piv.Validate(pi);
+
+                            if (currentPage == 1)
                             {
+                                // Prompt the user for the file name
+                                string fileLoc = Path.GetDirectoryName(doc.Name);
 
-                                plotSettingsHelper(tr, db, ed, window, pi, piv);
-
-                                if (currentPage == 1)
-                                {
-                                    setupProgressDialog(ppd, plotWindows.Count);
-                                    pe.BeginPlot(ppd, null);
-
-                                    // Prompt the user for the file name
-                                    string fileLoc = Path.GetDirectoryName(doc.Name);
-
-                                    // The "nameless" comes from refactored code. It should be a user input - EA
-                                    pe.BeginDocument(pi, doc.Name, null, 1, false, fileLoc + @"\" + "Nameless");
-                                }
-
-                                //Plot each sheet
-                                plotSheet(ppd, pe, pi, doc, currentPage, plotWindows.Count);
-                                currentPage++;
-
+                                // The "nameless" comes from refactored code. It should be a user input - EA
+                                pe.BeginDocument(pi, doc.Name, null, 1, false, fileLoc + @"\" + "Nameless");
                             }
-                            pe.EndDocument(null);
-                            ppd.PlotProgressPos = 100;
-                            ppd.OnEndPlot();
-                            pe.EndPlot(null);
+
+                            PlotPageInfo ppi = new PlotPageInfo();
+                            
+                            pe.BeginPage(ppi, pi, (currentPage == plotWindows.Count), null);
+                            pe.BeginGenerateGraphics(null);
+                            ppd.SheetProgressPos = 50;
+                            pe.EndGenerateGraphics(null);
+
+                            PreviewEndPlotInfo pepi = new PreviewEndPlotInfo();
+                            pe.EndPage(pepi);
+                            //result = pepi.Status;
+                            ppd.SheetProgressPos = 100;
+                            ppd.OnEndSheet();
+
+                            // keep system responsive
+                            System.Windows.Forms.Application.DoEvents();
+
                         }
+                        pe.EndDocument(null);
+                        ppd.PlotProgressPos = 100;
+                        ppd.OnEndPlot();
+                        pe.EndPlot(null);
+                        pe.Dispose();
                     }
+
                 }
                 else
                 {
                     ed.WriteMessage("\nAnother plot is in progress.");
                 }
-                tr.Commit();
+                // This line is only needed when running testRectangles
+                //tr.Commit();
+
                 // Probably not needed. But it makes sense to me to have it here. - EA
                 tr.Dispose();
             }
@@ -753,7 +819,7 @@ namespace Ridgeline
             return selectedMedia;
         }
 
-        public static void plotSettingsHelper(Transaction tr, Database db, Editor ed, Extents2d window, PlotInfo pi, PlotInfoValidator piv )
+        public static void plotSettingsHelper(Transaction tr, Database db, Editor ed, Extents2d window, PlotInfo pi, PlotInfoValidator piv)
         {
             BlockTableRecord btr = (BlockTableRecord)tr.GetObject(db.CurrentSpaceId, OpenMode.ForRead);
             Layout lo = (Layout)tr.GetObject(btr.LayoutId, OpenMode.ForRead);
