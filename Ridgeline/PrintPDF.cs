@@ -539,7 +539,7 @@ namespace Ridgeline
                             }
 
                             PlotPageInfo ppi = new PlotPageInfo();
-                            
+
                             pe.BeginPage(ppi, pi, (currentPage == plotWindows.Count), null);
                             pe.BeginGenerateGraphics(null);
                             ppd.SheetProgressPos = 50;
@@ -858,5 +858,351 @@ namespace Ridgeline
             pi.OverrideSettings = ps;
             piv.Validate(pi);
         }
+    }
+
+    public class PrintPDFThree
+    {
+        static string filePath = ""; // This variable is to capture user input for the file path and name
+        static string printVar = ""; // This variable is to capture user input for the print device
+
+        static int inputRows = 1; // This variable is to capture user input for the number of rows to plot
+        static int inputColumns = 1; // This variable is to capture user input for the number of columns to plot
+
+        // These two are for iterating over the rows and columns of titleblocks
+        static int currentRow = 1;
+        static int currentColumn = 1;
+
+        // Index variables to track current location for the List arrays
+        static int currentPage = 0;
+        static int currentPoint = 0;
+
+        // These two are for calculating the width and height of the plot area
+        static double plotBoxHeight = 0.0;
+        static double plotBoxWidth = 0.0;
+
+        // This list stores all points for the window plot area
+        // Index [0] is the lower left corner of the window
+        // Index [1] is the upper right corner of the window
+        // This pattern repeats for each window. The first two indexes are always the user input
+        static List<Point3d> points = new List<Point3d>();
+
+        // This list stores all the plot windows
+        // The first in the list is the first window based off of user input
+        static List<Extents2d> plotWindows = new List<Extents2d>();
+
+        [DllImport("accore.dll", CallingConvention = CallingConvention.Cdecl, EntryPoint = "acedTrans")]
+        static extern int acedTrans(double[] point, IntPtr fromRb, IntPtr toRb, int disp, double[] result);
+
+        [CommandMethod("PDFC")]
+        public static void printThePDF()
+        {
+            Document doc = Application.DocumentManager.MdiActiveDocument;
+            Editor ed = doc.Editor;
+            Database db = doc.Database;
+
+            // Clear and ensure its in memory
+            plotWindows.Clear();
+            points.Clear();
+
+            using (Transaction tr = db.TransactionManager.StartTransaction())
+            {
+
+                //BlockTable bt = (BlockTable)tr.GetObject(db.BlockTableId, OpenMode.ForRead);
+
+                // This object is for the PlotInfo to get the layout ID
+                //ObjectId modelSpaceId = bt[BlockTableRecord.ModelSpace];
+
+                // Check if a plot is already in progress
+                if (PlotFactory.ProcessPlotState == ProcessPlotState.NotPlotting)
+                {
+                    // Get the print variable from the user
+                    getPrintVar(ed);
+
+                    // Get the rows and columns of windows to plot
+                    inputRowCol(ed);
+
+                    // Get first window
+                    inputPoints(ed);
+                    addWindow();
+
+                    // Get the file path and name
+                    getFilePath(ed);
+
+                    // Loop through the rows and columns to get all the windows
+                    bool keepCollecting = true;
+                    while (keepCollecting)
+                    {
+                        // Translate the plot area to the right
+                        translatePlotAreaRight();
+                        // Add most recent points to window list
+                        addWindow();
+                        currentColumn++;
+
+                        // Check to see if at end of row
+                        if (currentColumn == inputColumns)
+                        {
+                            if (currentRow == inputRows)
+                            {
+                                keepCollecting = false;
+                            }
+
+                            //I could rewrite this to make the logic structure less confusing. Checking the boolean value is a bit redundant
+                            // However, I don't want to rewrite everything right now. Its not elegant, but if the extra "if" statements create
+                            // enough of a performance hit then I have to do a lot better - EA
+                            if (keepCollecting)
+                            {
+                                // Reset column count and move to next row
+                                currentColumn = 1;
+
+                                // Move the plot area down and return to the start of the row. Add that plot area to the window list
+                                translatePlotAreaDownandReturn();
+                                addWindow();
+
+                                currentRow++;
+                            }
+                        }
+                    }
+                    // Out of loop
+
+                    // Switch case function to determine the print settings
+                    printCase(doc, ed, db);
+                }
+
+            }
+        }
+
+
+        /***********************************************************************************************/
+        /**********Business Logic Methods**************************************************************/
+
+        // Set Assembly layers
+        public static void setAssemblyLayers(Editor ed, Database db)
+        {
+            using (Transaction tr = db.TransactionManager.StartTransaction())
+            {
+                LayerTable lt = (LayerTable)tr.GetObject(db.LayerTableId, OpenMode.ForRead);
+
+                // Turn layer "0" on
+                LayerTableRecord layer0 = (LayerTableRecord)tr.GetObject(lt["0"], OpenMode.ForWrite);
+                layer0.IsOff = false;
+
+                // Turn off specified layers
+                string[] layersToTurnOff = new string[] {
+                "cut", "crdim", "cut-path", "precut-path", "r-path", "wedge-path", "temp", "TEXT",
+                "_*cut-path", "_precut-path", "_wedge-path", "_hem-path", "_MILL*", "_Trespa*mmC*-PATH",
+                "_TrespaCut-PATH", "_TrespaCutSMALLPANEL-PATH", "_TrespaPRECUT*-PATH", "_TrespaTAB-PATH",
+                "_S-PATH*", "_*Small*-PATH", "_PERIMETER_RIVET-PATH", "_4mm_BACK_MILL-PATH", "_SRS_RIVET-PATH",
+                "_PER_RIVET-PATH"
+            };
+
+                foreach (string layerName in layersToTurnOff)
+                {
+                    if (lt.Has(layerName))
+                    {
+                        LayerTableRecord layer = (LayerTableRecord)tr.GetObject(lt[layerName], OpenMode.ForWrite);
+                        layer.IsOff = true;
+                    }
+                }
+
+                tr.Commit();
+            }
+
+            ed.WriteMessage("Layer state updated successfully.");
+        }
+
+
+
+        // Switch case function to determine the print settings
+        public static void printCase(Document doc, Editor ed, Database db)
+        {
+            switch (printVar)
+            {
+                case "A":
+                    // Print the assembly
+                    setAssemblyLayers(ed, db);
+
+                    break;
+                case "C":
+                    // Print the cut
+                    break;
+                case "B":
+                    // Print both
+                    break;
+                case "N":
+                    // Print none
+                    break;
+                default:
+                    // Print both
+                    break;
+            }
+        }
+
+
+        // This method is used to capture the print variable from the user
+        public static void getPrintVar(Editor ed)
+        {
+            // Prompt user to select print device
+            PromptResult result = ed.GetString("\nAssembly(A), Cut(C) or Both(B), None(N)? Default (B): ");
+            if (result.Status == PromptStatus.OK)
+            {
+                printVar = result.StringResult.ToUpper();
+            }
+            else
+            {
+                ed.WriteMessage("PrintVar not entered.");
+            }
+        }
+        // This method is used to capture user input for the file path and name
+        public static void getFilePath(Editor ed)
+        {
+            // Prompt user to select save directory and name
+            PromptSaveFileOptions options = new PromptSaveFileOptions("Select Save Directory & Name");
+            options.Filter = "PDF Files (*.pdf)|*.pdf|All Files (*.*)|*.*";
+            PromptFileNameResult result = ed.GetFileNameForSave(options);
+            if (result.Status == PromptStatus.OK)
+            {
+                filePath = result.StringResult;
+            }
+            else
+            {
+                ed.WriteMessage("File selection cancelled or failed.");
+            }
+        }
+
+        // This method is used to capture user input for the print area corners
+        public static void inputPoints(Editor ed)
+        {
+            //ask user for print window
+            Point3d first;
+            PromptPointOptions ppo = new PromptPointOptions("\nSelect the lower left corner of plot area: ");
+            ppo.AllowNone = false;
+            PromptPointResult ppr = ed.GetPoint(ppo);
+            if (ppr.Status == PromptStatus.OK)
+            { first = ppr.Value; }
+            else
+                return;
+
+
+            Point3d second;
+            PromptCornerOptions pco = new PromptCornerOptions("\nSelect upper right corner of the plot area.", first);
+            ppr = ed.GetCorner(pco);
+            if (ppr.Status == PromptStatus.OK)
+            { second = ppr.Value; }
+            else
+                return;
+            points.Add(first);
+            currentPoint++;
+            points.Add(second);
+            currentPoint++;
+
+        }
+
+
+        // This is a helper method to convert the points from UCS to DCS
+        // Combined with the interop above I copied this in part from another program. Much of the code is
+        // likely not needed. A window should just have the two points as 'double' values. - EA
+        public static Extents2d convertToWindow(Point3d firstNum, Point3d secondNum)
+        {
+            double minX;
+            double minY;
+            double maxX;
+            double maxY;
+
+            //sort through the values to be sure that the correct first and second are assigned
+            if (firstNum.X < secondNum.X)
+            { minX = firstNum.X; maxX = secondNum.X; }
+            else
+            { maxX = firstNum.X; minX = secondNum.X; }
+
+            if (firstNum.Y < secondNum.Y)
+            { minY = firstNum.Y; maxY = secondNum.Y; }
+            else
+            { maxY = firstNum.Y; minY = secondNum.Y; }
+
+            // Adds the width and height of the box to global variables
+            plotBoxWidth = Math.Abs(minX - maxX);
+            plotBoxHeight = Math.Abs(minY - maxY);
+
+            Point3d first = new Point3d(minX, minY, 0);
+            Point3d second = new Point3d(maxX, maxY, 0);
+            //converting numbers to something the system uses (DCS) instead of UCS
+            ResultBuffer rbFrom = new ResultBuffer(new TypedValue(5003, 1)), rbTo = new ResultBuffer(new TypedValue(5003, 2));
+            double[] firres = new double[] { 0, 0, 0 };
+            double[] secres = new double[] { 0, 0, 0 };
+            //convert points
+            acedTrans(first.ToArray(), rbFrom.UnmanagedObject, rbTo.UnmanagedObject, 0, firres);
+            acedTrans(second.ToArray(), rbFrom.UnmanagedObject, rbTo.UnmanagedObject, 0, secres);
+            Extents2d window = new Extents2d(firres[0], firres[1], secres[0], secres[1]);
+
+            return window;
+        }
+
+        public static void addWindow()
+        {
+            // Get the most recent index of the points list
+            int lastPoint = points.Count - 1;
+
+            // Add the two most recent points and put them in an extents2d object
+            plotWindows.Add(convertToWindow(points[lastPoint - 1], points[lastPoint]));
+
+
+        }
+
+        // This gets user input to determine the number of rows and columns to plot
+        public static void inputRowCol(Editor ed)
+        {
+            // Prompt for the first integer
+            PromptIntegerOptions intOptions1 = new PromptIntegerOptions("\nEnter the numbers of rows: ")
+            {
+                AllowNegative = false,
+                AllowZero = true,
+                AllowNone = false
+            };
+            PromptIntegerResult intResult1 = ed.GetInteger(intOptions1);
+            if (intResult1.Status != PromptStatus.OK) return;
+            inputRows = intResult1.Value;
+
+            // Prompt for the second integer
+            PromptIntegerOptions intOptions2 = new PromptIntegerOptions("\nEnter the number of columns: ")
+            {
+                AllowNegative = false,
+                AllowZero = true,
+                AllowNone = false
+            };
+            PromptIntegerResult intResult2 = ed.GetInteger(intOptions2);
+            if (intResult2.Status != PromptStatus.OK) return;
+            inputColumns = intResult2.Value;
+        }
+
+
+        // This method will translate the plot area to the right
+        public static void translatePlotAreaRight()
+        {
+            // Get the most recent index of the points list
+            int lastPoint = points.Count - 1;
+            // Get the two most recent points and move them to the right on the X axis by 1 box width
+            Point3d first = new Point3d(points[lastPoint - 1].X + plotBoxWidth, points[lastPoint - 1].Y, 0);
+            Point3d second = new Point3d(points[lastPoint].X + plotBoxWidth, points[lastPoint].Y, 0);
+            // Add the two most recent points and put them the points list
+            points.Add(first);
+            points.Add(second);
+        }
+
+        // This method will translate the plot area down one row
+        public static void translatePlotAreaDownandReturn()
+        {
+            // Get the most recent index of the points list
+            int lastPoint = points.Count - 1;
+
+            // Variable for the count total width of the row. The first point only goes back 4 spaces. 
+            double calculatedWidth = (plotBoxWidth * inputColumns) - plotBoxWidth;
+
+            // Get the two most recent points, and move them down on the Y axis by 1 box height. Then move them back to the start of the row
+            Point3d first = new Point3d(points[lastPoint - 1].X - calculatedWidth, points[lastPoint - 1].Y - plotBoxHeight, 0);
+            Point3d second = new Point3d(points[lastPoint].X - calculatedWidth, points[lastPoint].Y - plotBoxHeight, 0);
+            points.Add(first);
+            points.Add(second);
+        }
+
     }
 }
