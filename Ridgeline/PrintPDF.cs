@@ -862,8 +862,50 @@ namespace Ridgeline
 
     public class PrintPDFThree
     {
+        [CommandMethod("eloff")]
+        public static void turnOffLayers(string inputString)
+        {
+            // Get the current document and database
+            Document acDoc = Application.DocumentManager.MdiActiveDocument;
+            Database acCurDb = acDoc.Database;
+
+            // Start a transaction
+            using (Transaction acTrans = acCurDb.TransactionManager.StartTransaction())
+            {
+                // Open the Layer table for read
+                LayerTable acLyrTbl;
+                acLyrTbl = acTrans.GetObject(acCurDb.LayerTableId,
+                                                OpenMode.ForRead) as LayerTable;
+
+                string[] layerNamesArray = inputString.Split(',');
+
+                // Create a list to store the layer names
+                List<string> layerNamesList = new List<string>(layerNamesArray);
+
+                // Print the layer names
+                foreach (string layerName in layerNamesList)
+                {
+                    if (acLyrTbl.Has(layerName))
+                    {
+                        LayerTableRecord acLyrTblRec = acTrans.GetObject(acLyrTbl[layerName],
+                                                       OpenMode.ForWrite) as LayerTableRecord;
+
+                        // Turn the layer off
+                        acLyrTblRec.IsOff = true;
+                    }
+                }
+                acTrans.Commit();
+            }
+        }
+
         static string filePath = ""; // This variable is to capture user input for the file path and name
         static string printVar = ""; // This variable is to capture user input for the print device
+
+        // These strings are copied from the lisp files. They are put at the top of the class for easy maintenance
+        static string assemblyString = "cut,crdim,cut-path,precut-path,r-path,wedge-path,temp,TEXT,_*cut-path,_precut-path,_wedge-path,_hem-path,_MILL*,_Trespa*mmC*-PATH,_TrespaCut-PATH,_TrespaCutSMALLPANEL-PATH,_TrespaPRECUT*-PATH,_TrespaTAB-PATH,_S-PATH*,_*Small*-PATH,_PERIMETER_RIVET-PATH,_4mm_BACK_MILL-PATH,_SRS_RIVET-PATH,_PER_RIVET-PATH";
+        static string cutString = "cut-path,precut-path,r-path,wedge-path,temp,TEXT,_*cut-path,_precut-path,_wedge-path,_MILL*,asmb,asmbdim,stiff*,_Trespa*mmC*-PATH,_TrespaCut-PATH,_TrespaCutSMALLPANEL-PATH,_TrespaPRECUT*-PATH,_TrespaTAB-PATH,_S-PATH,_*Small*-PATH*,_4mm_BACK_MILL-PATH";
+        static string bothStringSwitch = "cut,crdim,cut-path,precut-path,r-path,wedge-path,temp,TEXT,_*cut-path,_precut-path,_wedge-path,_hem-path,_MILL*,_Trespa*mmC*-PATH,_TrespaCut-PATH,_TrespaCutSMALLPANEL-PATH,_TrespaPRECUT*-PATH,_TrespaTAB-PATH,_S-PATH*,_*Small*-PATH,_PERIMETER_RIVET-PATH,_4mm_BACK_MILL-PATH,_SRS_RIVET-PATH,_PER_RIVET-PATH";
+
 
         static int inputRows = 1; // This variable is to capture user input for the number of rows to plot
         static int inputColumns = 1; // This variable is to capture user input for the number of columns to plot
@@ -896,6 +938,7 @@ namespace Ridgeline
         [CommandMethod("PDFC")]
         public static void printThePDF()
         {
+            bool bothSwitch = false;
             Document doc = Application.DocumentManager.MdiActiveDocument;
             Editor ed = doc.Editor;
             Database db = doc.Database;
@@ -904,139 +947,96 @@ namespace Ridgeline
             plotWindows.Clear();
             points.Clear();
 
-            using (Transaction tr = db.TransactionManager.StartTransaction())
+
+
+            // Get the print variable from the user
+            getPrintVar(ed);
+
+            // Get the rows and columns of windows to plot
+            inputRowCol(ed);
+
+            // Get first window
+            inputPoints(ed);
+            addWindow();
+
+            // Get the file path and name
+            getFilePath(ed);
+
+            // Loop through the rows and columns to get all the windows
+            bool keepCollecting = true;
+            while (keepCollecting)
             {
+                // Translate the plot area to the right
+                translatePlotAreaRight();
+                // Add most recent points to window list
+                addWindow();
+                currentColumn++;
 
-                //BlockTable bt = (BlockTable)tr.GetObject(db.BlockTableId, OpenMode.ForRead);
-
-                // This object is for the PlotInfo to get the layout ID
-                //ObjectId modelSpaceId = bt[BlockTableRecord.ModelSpace];
-
-                // Check if a plot is already in progress
-                if (PlotFactory.ProcessPlotState == ProcessPlotState.NotPlotting)
+                // Check to see if at end of row
+                if (currentColumn == inputColumns)
                 {
-                    // Get the print variable from the user
-                    getPrintVar(ed);
-
-                    // Get the rows and columns of windows to plot
-                    inputRowCol(ed);
-
-                    // Get first window
-                    inputPoints(ed);
-                    addWindow();
-
-                    // Get the file path and name
-                    getFilePath(ed);
-
-                    // Loop through the rows and columns to get all the windows
-                    bool keepCollecting = true;
-                    while (keepCollecting)
+                    if (currentRow == inputRows)
                     {
-                        // Translate the plot area to the right
-                        translatePlotAreaRight();
-                        // Add most recent points to window list
-                        addWindow();
-                        currentColumn++;
-
-                        // Check to see if at end of row
-                        if (currentColumn == inputColumns)
-                        {
-                            if (currentRow == inputRows)
-                            {
-                                keepCollecting = false;
-                            }
-
-                            //I could rewrite this to make the logic structure less confusing. Checking the boolean value is a bit redundant
-                            // However, I don't want to rewrite everything right now. Its not elegant, but if the extra "if" statements create
-                            // enough of a performance hit then I have to do a lot better - EA
-                            if (keepCollecting)
-                            {
-                                // Reset column count and move to next row
-                                currentColumn = 1;
-
-                                // Move the plot area down and return to the start of the row. Add that plot area to the window list
-                                translatePlotAreaDownandReturn();
-                                addWindow();
-
-                                currentRow++;
-                            }
-                        }
+                        keepCollecting = false;
                     }
-                    // Out of loop
 
-                    // Switch case function to determine the print settings
-                    printCase(doc, ed, db);
+                    //I could rewrite this to make the logic structure less confusing. Checking the boolean value is a bit redundant
+                    // However, I don't want to rewrite everything right now. Its not elegant, but if the extra "if" statements create
+                    // enough of a performance hit then I have to do a lot better - EA
+                    if (keepCollecting)
+                    {
+                        // Reset column count and move to next row
+                        currentColumn = 1;
+
+                        // Move the plot area down and return to the start of the row. Add that plot area to the window list
+                        translatePlotAreaDownandReturn();
+                        addWindow();
+
+                        currentRow++;
+                    }
                 }
+            }
+            //Out of the while loop
 
+            // Turn layers on
+            ed.Command("LAYON");
+
+            switch (printVar)
+            {
+                case "A":
+                    turnOffLayers(assemblyString);
+                    break;
+                case "C":
+                    turnOffLayers(cutString);
+                    break;
+                case "B":
+                    bothSwitch = true;
+                    turnOffLayers(assemblyString);
+                    break;
+                case "N":
+                    return;
+                default:
+                    return;
+            }
+            // Rerun the loop to turn off the layers and print again
+            while (bothSwitch)
+            {
+                foreach (Extents2d window in plotWindows)
+                {
+
+                }
+                if (bothSwitch)
+                {
+                    bothSwitch = false;
+                    ed.Command("LAYON");
+                    turnOffLayers(cutString);
+                }
             }
         }
 
 
         /***********************************************************************************************/
         /**********Business Logic Methods**************************************************************/
-
-        // Set Assembly layers
-        public static void setAssemblyLayers(Editor ed, Database db)
-        {
-            using (Transaction tr = db.TransactionManager.StartTransaction())
-            {
-                LayerTable lt = (LayerTable)tr.GetObject(db.LayerTableId, OpenMode.ForRead);
-
-                // Turn layer "0" on
-                LayerTableRecord layer0 = (LayerTableRecord)tr.GetObject(lt["0"], OpenMode.ForWrite);
-                layer0.IsOff = false;
-
-                // Turn off specified layers
-                string[] layersToTurnOff = new string[] {
-                "cut", "crdim", "cut-path", "precut-path", "r-path", "wedge-path", "temp", "TEXT",
-                "_*cut-path", "_precut-path", "_wedge-path", "_hem-path", "_MILL*", "_Trespa*mmC*-PATH",
-                "_TrespaCut-PATH", "_TrespaCutSMALLPANEL-PATH", "_TrespaPRECUT*-PATH", "_TrespaTAB-PATH",
-                "_S-PATH*", "_*Small*-PATH", "_PERIMETER_RIVET-PATH", "_4mm_BACK_MILL-PATH", "_SRS_RIVET-PATH",
-                "_PER_RIVET-PATH"
-            };
-
-                foreach (string layerName in layersToTurnOff)
-                {
-                    if (lt.Has(layerName))
-                    {
-                        LayerTableRecord layer = (LayerTableRecord)tr.GetObject(lt[layerName], OpenMode.ForWrite);
-                        layer.IsOff = true;
-                    }
-                }
-
-                tr.Commit();
-            }
-
-            ed.WriteMessage("Layer state updated successfully.");
-        }
-
-
-
-        // Switch case function to determine the print settings
-        public static void printCase(Document doc, Editor ed, Database db)
-        {
-            switch (printVar)
-            {
-                case "A":
-                    // Print the assembly
-                    setAssemblyLayers(ed, db);
-
-                    break;
-                case "C":
-                    // Print the cut
-                    break;
-                case "B":
-                    // Print both
-                    break;
-                case "N":
-                    // Print none
-                    break;
-                default:
-                    // Print both
-                    break;
-            }
-        }
-
 
         // This method is used to capture the print variable from the user
         public static void getPrintVar(Editor ed)
