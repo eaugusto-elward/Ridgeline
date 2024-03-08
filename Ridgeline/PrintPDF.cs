@@ -9,6 +9,7 @@ using System.Collections.Generic;
 using System.Collections.Specialized;
 using System.IO;
 using System.Runtime.InteropServices;
+using System.Runtime.InteropServices.ComTypes;
 using System.Xml.Linq;
 
 
@@ -862,6 +863,27 @@ namespace Ridgeline
 
     public class PrintPDFThree
     {
+        // plotCommand += $"{window.MinPoint.X},{window.MinPoint.Y} {window.MaxPoint.X},{window.MaxPoint.Y} ";
+        [CommandMethod("TESTPLOT")]
+        public static void testPlot()
+        {
+            Document doc = Application.DocumentManager.MdiActiveDocument;
+            Database db = doc.Database;
+            Editor ed = doc.Editor;
+            Extents2d window = new Extents2d(new Point2d(0, 0), new Point2d(1.5, 3));
+
+            string lowerLeft = window.MinPoint.X.ToString() + "," + window.MinPoint.Y.ToString();
+            string upperRight = window.MaxPoint.X.ToString() + "," + window.MaxPoint.Y.ToString();
+            ed.Command("-PLOT", "YES", "Model", "Bluebeam PDF", "Letter", "Inches", "Portrait", "No", "Window", lowerLeft, upperRight, "Fit", "Center", "Yes", "acad.ctb", "Yes", "", "N", "N", "Y");
+            // Printer Command
+            //ed.Command("-PLOT", "YES", "Model", "KyoceraPM", "Letter", "Inches", "Portrait", "No", "Window", lowerLeft, upperRight, "Fit", "Center"); //, "Yes", "", "Yes", "No", "No", "Yes", "Y");
+
+            // PDF Command
+            ed.Command("-PLOT", "YES", "Model", "Bluebeam PDF", "Letter", "Inches", "Portrait", "No", "Window", lowerLeft, upperRight, "Fit", "Center", "Yes", "acad.ctb", "Yes", "", "N", "N", "Y");
+
+        }
+
+
         [CommandMethod("eloff")]
         public static void turnOffLayers(string inputString)
         {
@@ -1018,20 +1040,38 @@ namespace Ridgeline
                 default:
                     return;
             }
-            // Rerun the loop to turn off the layers and print again
-            while (bothSwitch)
+            
+            string lowerLeft = "";
+            string upperRight = "";
+            string filename = "";
+            foreach (Extents2d window in plotWindows)
             {
-                foreach (Extents2d window in plotWindows)
-                {
+                filename = Path.GetFileName(filePath);
+                filename += "_" + currentPage.ToString();
 
-                }
-                if (bothSwitch)
-                {
+                lowerLeft = window.MinPoint.X.ToString() + "," + window.MinPoint.Y.ToString();
+                upperRight = window.MaxPoint.X.ToString() + "," + window.MaxPoint.Y.ToString();
+                ed.Command("-PLOT", "YES", "Model", "Bluebeam PDF", "Letter", "Inches", "Portrait", "No", "Window", lowerLeft, upperRight, "Fit", "Center", "Yes", "acad.ctb", "Yes", "", "N", "N", "Y", filename);
+                currentPage++;
+            }
+            if (bothSwitch)
+            {
+                
                     bothSwitch = false;
                     ed.Command("LAYON");
                     turnOffLayers(cutString);
+                foreach (Extents2d window in plotWindows)
+                {
+                    filename = Path.GetFileName(filePath);
+                    filename += "_" + currentPage.ToString();
+
+                    lowerLeft = window.MinPoint.X.ToString() + "," + window.MinPoint.Y.ToString();
+                    upperRight = window.MaxPoint.X.ToString() + "," + window.MaxPoint.Y.ToString();
+                    ed.Command("-PLOT", "YES", "Model", "Bluebeam PDF", "Letter", "Inches", "Portrait", "No", "Window", lowerLeft, upperRight, "Fit", "Center", "Yes", "acad.ctb", "Yes", "", "N", "N", "Y", filename);
+                    currentPage++;
                 }
             }
+
         }
 
 
